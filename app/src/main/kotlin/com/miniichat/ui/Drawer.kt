@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -207,7 +208,7 @@ fun GlassDrawer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    androidx.compose.material.icons.Icons.AutoMirrored.Filled.MenuBook, contentDescription = null,
+                    Icons.AutoMirrored.Filled.MenuBook, contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.width(12.dp))

@@ -35,6 +35,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
@@ -304,7 +306,7 @@ private fun ChatTopBar(
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
             IconButton(onClick = onOpenWiki) {
-                Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.MenuBook, contentDescription = "wiki",
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "wiki",
                     tint = MaterialTheme.colorScheme.onSurface)
             }
             IconButton(onClick = onNew) {
@@ -854,7 +856,7 @@ private fun SaveToWikiButton(onClick: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                androidx.compose.material.icons.Icons.AutoMirrored.Filled.NoteAdd,
+                Icons.AutoMirrored.Filled.NoteAdd,
                 contentDescription = null,
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.primary
