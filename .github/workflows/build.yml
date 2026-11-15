@@ -2,7 +2,8 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ '**' ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -40,14 +41,14 @@ jobs:
       - name: Upload debug APK (CI artifact only)
         uses: actions/upload-artifact@v4
         with:
-          name: miniichat-debug
+          name: miniichat-lab-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - name: Upload release APKs (CI artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: miniichat-release
+          name: miniichat-lab-release
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 

@@ -30,7 +30,7 @@ import com.miniichat.R
 import com.miniichat.data.ProviderConfig
 import kotlinx.coroutines.launch
 
-private enum class Screen { Chat, Settings, Providers, ProviderEdit, Assistants }
+private enum class Screen { Chat, Settings, Providers, ProviderEdit, Assistants, Speech }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +59,9 @@ fun AppRoot(vm: ChatViewModel) {
     androidx.activity.compose.BackHandler(enabled = screen == Screen.Assistants) {
         screen = Screen.Settings
     }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.Speech) {
+        screen = Screen.Settings
+    }
 
     val conversations by vm.conversations.collectAsState()
     val activeId by vm.activeId.collectAsState()
@@ -69,6 +72,11 @@ fun AppRoot(vm: ChatViewModel) {
     val error by vm.error.collectAsState()
     val toast by vm.toast.collectAsState()
     val fetchingId by vm.fetchingModelsFor.collectAsState()
+    val transcription by vm.transcription.collectAsState()
+    val pendingTranscript by vm.pendingTranscript.collectAsState()
+    val attachmentUpdate by vm.attachmentUpdates.collectAsState()
+    val installedModels by vm.modelManager.installed.collectAsState()
+    val hasSpeechModel = settings.whisperModel.isNotBlank() && settings.whisperModel in installedModels
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
@@ -132,7 +140,17 @@ fun AppRoot(vm: ChatViewModel) {
                                 editingProvider = null
                                 screen = Screen.ProviderEdit
                             } else showModelPicker = true
-                        }
+                        },
+                        transcription = transcription,
+                        pendingTranscript = pendingTranscript,
+                        onConsumeTranscript = { vm.consumePendingTranscript() },
+                        attachmentUpdate = attachmentUpdate,
+                        onConsumeAttachmentUpdate = { vm.consumeAttachmentUpdate() },
+                        hasSpeechModel = hasSpeechModel,
+                        onRecordingFinished = { rec, tr, add -> vm.onRecordingFinished(rec, tr, add) },
+                        onImportAudio = { uri, add -> vm.importAudio(uri, add) },
+                        onTranscribe = { vm.transcribe(it) },
+                        onCancelTranscription = { vm.cancelTranscription() }
                     )
                 }
             }
@@ -144,7 +162,18 @@ fun AppRoot(vm: ChatViewModel) {
                     onBack = { screen = Screen.Chat },
                     onChange = { vm.updateSettings(it) },
                     onOpenProviders = { screen = Screen.Providers },
-                    onOpenAssistants = { screen = Screen.Assistants }
+                    onOpenAssistants = { screen = Screen.Assistants },
+                    onOpenSpeech = { screen = Screen.Speech }
+                )
+            }
+            Screen.Speech -> {
+                SpeechSettingsScreen(
+                    settings = settings,
+                    manager = vm.modelManager,
+                    onBack = { screen = Screen.Settings },
+                    onChange = { vm.updateSettings(it) },
+                    recordingsUsage = { vm.recordingsUsage() },
+                    onDeleteUnusedRecordings = { vm.deleteUnusedRecordings() }
                 )
             }
             Screen.Assistants -> {

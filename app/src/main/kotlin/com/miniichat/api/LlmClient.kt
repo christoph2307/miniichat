@@ -32,12 +32,17 @@ import kotlinx.serialization.json.put
 
 @Serializable
 data class ChatPart(
-    val type: String,                 // "text" | "image_url"
+    val type: String,                 // "text" | "image_url" | "input_audio"
     val text: String? = null,
-    @SerialName("image_url") val imageUrl: ImageUrl? = null
+    @SerialName("image_url") val imageUrl: ImageUrl? = null,
+    @SerialName("input_audio") val inputAudio: InputAudio? = null
 ) {
     @Serializable
     data class ImageUrl(val url: String, val detail: String? = null)
+
+    /** OpenAI-style audio input part (gpt-4o-audio, Gemini OpenAI shim, …). */
+    @Serializable
+    data class InputAudio(val data: String, val format: String = "wav")
 }
 
 /**

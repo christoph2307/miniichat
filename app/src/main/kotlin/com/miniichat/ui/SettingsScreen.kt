@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -61,7 +62,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onOpenProviders: () -> Unit,
-    onOpenAssistants: () -> Unit
+    onOpenAssistants: () -> Unit,
+    onOpenSpeech: () -> Unit = {}
 ) {
     // Local state seeded once; LaunchedEffect resyncs only when external settings change.
     var system by rememberSaveable { mutableStateOf(settings.systemPrompt) }
@@ -134,6 +136,33 @@ fun SettingsScreen(
                         Text(
                             active?.let { "${it.avatar}  ${it.name}" }
                                 ?: "${assistants.size} assistants",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(Icons.Default.ChevronRight, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            // Speech recognition entry
+            SectionCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenSpeech)
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Mic, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.speech_recognition),
+                            style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            settings.whisperModel.removePrefix("ggml-").removeSuffix(".bin")
+                                .ifBlank { stringResource(R.string.speech_no_model) },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

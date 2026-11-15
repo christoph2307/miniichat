@@ -10,12 +10,28 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.miniichat"
+        // Separate id so the fork installs side-by-side with upstream MiniiChat
+        applicationId = "com.miniichat.lab"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.0.2"
+        versionCode = 8
+        versionName = "1.1.0-lab"
         vectorDrawables { useSupportLibrary = true }
+
+        externalNativeBuild {
+            cmake {
+                // whisper.cpp must be optimised even in debug builds, otherwise it's ~10x slower
+                arguments += listOf("-DCMAKE_BUILD_TYPE=Release")
+                cppFlags += listOf("-O3", "-fexceptions", "-frtti")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     signingConfigs {
@@ -89,7 +105,7 @@ android {
                 ?.identifier
                 ?: "universal"
             output.outputFileName =
-                "miniichat-${variant.versionName}-${abiName}-${variant.buildType.name}.apk"
+                "miniichat-lab-${variant.versionName}-${abiName}-${variant.buildType.name}.apk"
         }
     }
 
@@ -134,6 +150,7 @@ dependencies {
     implementation("io.ktor:ktor-client-logging:2.3.12")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

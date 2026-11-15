@@ -1,0 +1,186 @@
+// JNI bridge between Kotlin (com.miniichat.whisper.WhisperLib) and whisper.cpp
+#include <jni.h>
+#include <string>
+#include <atomic>
+#include <cstring>
+#include "whisper.h"
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "WhisperJNI", __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, "WhisperJNI", __VA_ARGS__)
+#else
+#include <cstdio>
+#define LOGI(...) do { fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
+#define LOGW(...) LOGI(__VA_ARGS__)
+#endif
+
+namespace {
+
+struct CallbackCtx {
+    JNIEnv *env;
+    jobject listener;      // may be null
+    jmethodID onProgress;  // void onProgress(int)
+    jmethodID onSegment;   // void onSegment(String)
+    std::atomic<bool> *abort;
+};
+
+std::atomic<bool> g_abort{false};
+
+jstring toJString(JNIEnv *env, const char *s) {
+    // NewStringUTF needs modified UTF-8; whisper may emit partial multibyte
+    // sequences at token boundaries, so go through a byte[] + String(bytes, "UTF-8").
+    if (!s) s = "";
+    const jsize len = (jsize) strlen(s);
+    jbyteArray bytes = env->NewByteArray(len);
+    env->SetByteArrayRegion(bytes, 0, len, reinterpret_cast<const jbyte *>(s));
+    jclass strCls = env->FindClass("java/lang/String");
+    jmethodID ctor = env->GetMethodID(strCls, "<init>", "([BLjava/lang/String;)V");
+    jstring charset = env->NewStringUTF("UTF-8");
+    auto out = (jstring) env->NewObject(strCls, ctor, bytes, charset);
+    env->DeleteLocalRef(bytes);
+    env->DeleteLocalRef(charset);
+    env->DeleteLocalRef(strCls);
+    return out;
+}
+
+void progressCb(struct whisper_context *, struct whisper_state *, int progress, void *user) {
+    auto *cb = static_cast<CallbackCtx *>(user);
+    if (cb && cb->listener && cb->onProgress) {
+        cb->env->CallVoidMethod(cb->listener, cb->onProgress, (jint) progress);
+        if (cb->env->ExceptionCheck()) cb->env->ExceptionClear();
+    }
+}
+
+void segmentCb(struct whisper_context *ctx, struct whisper_state *, int n_new, void *user) {
+    auto *cb = static_cast<CallbackCtx *>(user);
+    if (!cb || !cb->listener || !cb->onSegment) return;
+    const int n = whisper_full_n_segments(ctx);
+    for (int i = n - n_new; i < n; ++i) {
+        jstring s = toJString(cb->env, whisper_full_get_segment_text(ctx, i));
+        cb->env->CallVoidMethod(cb->listener, cb->onSegment, s);
+        if (cb->env->ExceptionCheck()) cb->env->ExceptionClear();
+        cb->env->DeleteLocalRef(s);
+    }
+}
+
+bool abortCb(void *user) {
+    auto *flag = static_cast<std::atomic<bool> *>(user);
+    return flag && flag->load();
+}
+
+bool encoderBeginCb(struct whisper_context *, struct whisper_state *, void *user) {
+    return !abortCb(user);
+}
+
+} // namespace
+
+extern "C" {
+
+JNIEXPORT jlong JNICALL
+Java_com_miniichat_whisper_WhisperLib_initContext(JNIEnv *env, jobject, jstring modelPath, jboolean useGpu) {
+    const char *path = env->GetStringUTFChars(modelPath, nullptr);
+    whisper_context_params cparams = whisper_context_default_params();
+    cparams.use_gpu = useGpu == JNI_TRUE;
+    whisper_context *ctx = whisper_init_from_file_with_params(path, cparams);
+    if (!ctx) LOGW("failed to load model %s", path);
+    env->ReleaseStringUTFChars(modelPath, path);
+    return reinterpret_cast<jlong>(ctx);
+}
+
+JNIEXPORT void JNICALL
+Java_com_miniichat_whisper_WhisperLib_freeContext(JNIEnv *, jobject, jlong ptr) {
+    auto *ctx = reinterpret_cast<whisper_context *>(ptr);
+    if (ctx) whisper_free(ctx);
+}
+
+JNIEXPORT void JNICALL
+Java_com_miniichat_whisper_WhisperLib_requestAbort(JNIEnv *, jobject) {
+    g_abort.store(true);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_miniichat_whisper_WhisperLib_transcribe(
+        JNIEnv *env, jobject,
+        jlong ptr, jfloatArray samples, jstring language, jint threads,
+        jboolean translate, jstring initialPrompt, jobject listener) {
+    auto *ctx = reinterpret_cast<whisper_context *>(ptr);
+    if (!ctx) return toJString(env, "");
+
+    g_abort.store(false);
+
+    const char *lang = env->GetStringUTFChars(language, nullptr);
+    const char *prompt = initialPrompt ? env->GetStringUTFChars(initialPrompt, nullptr) : nullptr;
+
+    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    params.print_realtime   = false;
+    params.print_progress   = false;
+    params.print_timestamps = false;
+    params.print_special    = false;
+    params.translate        = translate == JNI_TRUE;
+    params.language         = (lang && strlen(lang) > 0) ? lang : "auto";
+    params.detect_language  = false;
+    params.n_threads        = threads > 0 ? threads : 4;
+    params.no_context       = true;
+    params.single_segment   = false;
+    params.suppress_blank   = true;
+    if (prompt && strlen(prompt) > 0) params.initial_prompt = prompt;
+
+    CallbackCtx cb{};
+    cb.env = env;
+    cb.listener = listener;
+    cb.abort = &g_abort;
+    if (listener) {
+        jclass cls = env->GetObjectClass(listener);
+        cb.onProgress = env->GetMethodID(cls, "onProgress", "(I)V");
+        cb.onSegment  = env->GetMethodID(cls, "onSegment", "(Ljava/lang/String;)V");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); cb.onProgress = nullptr; cb.onSegment = nullptr; }
+        env->DeleteLocalRef(cls);
+        params.progress_callback = progressCb;
+        params.progress_callback_user_data = &cb;
+        params.new_segment_callback = segmentCb;
+        params.new_segment_callback_user_data = &cb;
+    }
+    params.abort_callback = abortCb;
+    params.abort_callback_user_data = &g_abort;
+    params.encoder_begin_callback = encoderBeginCb;
+    params.encoder_begin_callback_user_data = &g_abort;
+
+    jsize n = env->GetArrayLength(samples);
+    jfloat *data = env->GetFloatArrayElements(samples, nullptr);
+
+    int rc = whisper_full(ctx, params, data, n);
+
+    env->ReleaseFloatArrayElements(samples, data, JNI_ABORT);
+
+    std::string out;
+    if (rc == 0) {
+        const int segs = whisper_full_n_segments(ctx);
+        for (int i = 0; i < segs; ++i) {
+            const char *t = whisper_full_get_segment_text(ctx, i);
+            if (t) out += t;
+        }
+    } else {
+        LOGW("whisper_full failed: %d", rc);
+    }
+
+    env->ReleaseStringUTFChars(language, lang);
+    if (prompt) env->ReleaseStringUTFChars(initialPrompt, prompt);
+
+    return toJString(env, out.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_miniichat_whisper_WhisperLib_systemInfo(JNIEnv *env, jobject) {
+    return toJString(env, whisper_print_system_info());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_miniichat_whisper_WhisperLib_detectedLanguage(JNIEnv *env, jobject, jlong ptr) {
+    auto *ctx = reinterpret_cast<whisper_context *>(ptr);
+    if (!ctx) return toJString(env, "");
+    int id = whisper_full_lang_id(ctx);
+    return toJString(env, id >= 0 ? whisper_lang_str(id) : "");
+}
+
+} // extern "C"

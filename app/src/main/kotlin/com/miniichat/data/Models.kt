@@ -6,11 +6,15 @@ enum class Role { user, assistant, system }
 
 @Serializable
 data class Attachment(
-    val type: String,        // "image" | "file"
+    val type: String,        // "image" | "file" | "audio"
     val uri: String,         // content:// or file path
     val mimeType: String,
     val name: String,
-    val sizeBytes: Long = 0
+    val sizeBytes: Long = 0,
+    /** Audio only: duration of the recording. */
+    val durationMs: Long = 0,
+    /** Audio only: local whisper transcript, if one was made. */
+    val transcript: String? = null
 )
 
 @Serializable

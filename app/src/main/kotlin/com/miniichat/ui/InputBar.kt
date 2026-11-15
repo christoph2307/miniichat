@@ -30,6 +30,9 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -58,6 +61,13 @@ import androidx.compose.ui.unit.sp
 import com.miniichat.R
 import com.miniichat.data.Attachment
 import com.miniichat.util.AttachmentLoader
+import com.miniichat.audio.FinishedRecording
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import java.io.File
 
 @Composable
 fun InputBar(
@@ -68,11 +78,82 @@ fun InputBar(
     onSend: () -> Unit,
     onStop: () -> Unit,
     isStreaming: Boolean,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    playback: AudioPlayback? = null,
+    autoTranscribe: Boolean = true,
+    hasSpeechModel: Boolean = false,
+    onRecordingFinished: (FinishedRecording, Boolean) -> Unit = { _, _ -> },
+    onImportAudio: (Uri) -> Unit = {},
+    onTranscribe: (Attachment) -> Unit = {}
 ) {
     val focus = LocalFocusManager.current
     val ctx = LocalContext.current
     var attachMenuOpen by remember { mutableStateOf(false) }
+    var showRecorder by remember { mutableStateOf(false) }
+    val audioPlayback = playback ?: rememberAudioPlayback()
+
+    // --- microphone permission → open dictaphone sheet ---
+    val requestPerms = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted[Manifest.permission.RECORD_AUDIO] == true) showRecorder = true
+        else android.widget.Toast.makeText(
+            ctx, ctx.getString(R.string.mic_permission_denied), android.widget.Toast.LENGTH_LONG
+        ).show()
+    }
+    fun startRecording() {
+        val hasMic = ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        val needNotif = Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        if (hasMic && !needNotif) { showRecorder = true; return }
+        val perms = buildList {
+            add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (hasMic) {
+            // notification permission is optional; ask once but don't block recording
+            showRecorder = true
+            requestPerms.launch(perms.filter { it != Manifest.permission.RECORD_AUDIO }.toTypedArray())
+        } else requestPerms.launch(perms.toTypedArray())
+    }
+
+    if (showRecorder) {
+        RecorderSheet(
+            autoTranscribe = autoTranscribe,
+            hasModel = hasSpeechModel,
+            onFinished = onRecordingFinished,
+            onDismiss = { showRecorder = false }
+        )
+    }
+
+    // --- camera capture (no CAMERA permission needed: uses the system camera app) ---
+    var pendingPhoto by remember { mutableStateOf<Pair<Uri, File>?>(null) }
+    val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val p = pendingPhoto
+        pendingPhoto = null
+        if (ok && p != null && p.second.length() > 0) {
+            onAttachmentsChange(attachments + Attachment(
+                type = "image", uri = p.first.toString(), mimeType = "image/jpeg",
+                name = p.second.name, sizeBytes = p.second.length()
+            ))
+        } else p?.second?.delete()
+    }
+    fun launchCamera() {
+        val dir = File(ctx.filesDir, "photos").apply { mkdirs() }
+        val f = File(dir, "photo_${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+        pendingPhoto = uri to f
+        runCatching { takePhoto.launch(uri) }.onFailure {
+            pendingPhoto = null
+            android.widget.Toast.makeText(ctx, it.message ?: "No camera app", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) onImportAudio(uri)
+    }
 
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -143,9 +224,21 @@ fun InputBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(attachments, key = { it.uri }) { att ->
-                    AttachmentChip(att = att, onRemove = {
-                        onAttachmentsChange(attachments - att)
-                    })
+                    if (att.type == "audio") {
+                        AudioAttachmentChip(
+                            att = att,
+                            playback = audioPlayback,
+                            onTranscribe = if (att.transcript.isNullOrBlank()) ({ onTranscribe(att) }) else null,
+                            onRemove = {
+                                if (audioPlayback.playingUri == att.uri) audioPlayback.stop()
+                                onAttachmentsChange(attachments - att)
+                            }
+                        )
+                    } else {
+                        AttachmentChip(att = att, onRemove = {
+                            onAttachmentsChange(attachments - att)
+                        })
+                    }
                 }
             }
         }
@@ -176,6 +269,30 @@ fun InputBar(
                     expanded = attachMenuOpen,
                     onDismissRequest = { attachMenuOpen = false }
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.take_photo)) },
+                        leadingIcon = { Icon(Icons.Default.PhotoCamera, null) },
+                        onClick = {
+                            attachMenuOpen = false
+                            launchCamera()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.record_voice)) },
+                        leadingIcon = { Icon(Icons.Default.Mic, null) },
+                        onClick = {
+                            attachMenuOpen = false
+                            startRecording()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.import_audio)) },
+                        leadingIcon = { Icon(Icons.Default.AudioFile, null) },
+                        onClick = {
+                            attachMenuOpen = false
+                            pickAudio.launch("audio/*")
+                        }
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.attach_image)) },
                         leadingIcon = { Icon(Icons.Default.Image, null) },
@@ -225,6 +342,23 @@ fun InputBar(
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     maxLines = 6,
                     enabled = enabled
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            // dictaphone
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .clickable(enabled = !isStreaming) { focus.clearFocus(); startRecording() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Mic,
+                    contentDescription = stringResource(R.string.record_voice),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(18.dp)
                 )
             }
             Spacer(Modifier.width(6.dp))

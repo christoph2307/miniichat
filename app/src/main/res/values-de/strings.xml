@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voice_recording">Sprachaufnahme</string>
+    <string name="transcribed">transkribiert</string>
+    <string name="decoding_audio">Audio wird konvertiert…</string>
+    <string name="loading_model">Sprachmodell wird geladen…</string>
+    <string name="transcribing_pct">Lokale Transkription… %1$d%%</string>
+    <string name="rec_recording">Aufnahme</string>
+    <string name="rec_paused">Pausiert</string>
+    <string name="rec_discard">Verwerfen</string>
+    <string name="rec_pause">Pause</string>
+    <string name="rec_resume">Fortsetzen</string>
+    <string name="rec_done">Fertig</string>
+    <string name="rec_hint_auto">Wird nach „Fertig“ auf dem Gerät transkribiert</string>
+    <string name="rec_hint_manual">Wird als Anhang gespeichert. Untertitel-Symbol tippen zum Transkribieren.</string>
+    <string name="rec_hint_no_model">Kein Whisper-Modell installiert – Aufnahme wird ohne Transkript angehängt</string>
+    <string name="rec_channel">Diktiergerät</string>
+    <string name="rec_notification_title">Aufnahme läuft…</string>
+    <string name="rec_notification_text">Das Diktiergerät nimmt auf. Tippen zum Öffnen.</string>
+    <string name="mic_permission_denied">Für Aufnahmen wird die Mikrofon-Berechtigung benötigt</string>
+    <string name="take_photo">Foto aufnehmen</string>
+    <string name="record_voice">Sprache aufnehmen</string>
+    <string name="import_audio">Audiodatei transkribieren</string>
+    <string name="speech_recognition">Spracherkennung</string>
+    <string name="speech_no_model">Kein Modell – zum Einrichten tippen</string>
+    <string name="speech_intro">Aufnahmen werden mit whisper.cpp direkt auf dem Gerät transkribiert. Audio verlässt das Telefon nur, wenn „Audio an Modell senden“ aktiv ist. Modell einmalig herunterladen (WLAN empfohlen).</string>
+    <string name="speech_models">Whisper-Modelle</string>
+    <string name="speech_import_model">Modelldatei importieren</string>
+    <string name="speech_import_model_hint">Beliebige ggml-Whisper-.bin, z. B. ein deutsches Fine-Tuning</string>
+    <string name="speech_options">Erkennung</string>
+    <string name="speech_language">Gesprochene Sprache</string>
+    <string name="speech_glossary">Glossar / Fachbegriffe</string>
+    <string name="speech_glossary_hint">Fachbegriffe, Namen, Chemikalien, Einheiten… verbessert die Schreibweise</string>
+    <string name="speech_threads">CPU-Threads: %1$d</string>
+    <string name="speech_auto_transcribe">Automatisch transkribieren</string>
+    <string name="speech_auto_transcribe_hint">Whisper startet direkt nach dem Ende der Aufnahme</string>
+    <string name="speech_translate">Ins Englische übersetzen</string>
+    <string name="speech_translate_hint">Whisper gibt unabhängig von der Sprache englischen Text aus</string>
+    <string name="speech_send_audio">Audio an Modell senden</string>
+    <string name="speech_send_audio_hint">WAV zusätzlich als input_audio hochladen (nur audiofähige Modelle, max. 10 MB)</string>
+    <string name="speech_storage">Speicher</string>
+    <string name="speech_recordings">Aufnahmen</string>
+    <string name="speech_delete_unused">Unbenutzte löschen</string>
+</resources>

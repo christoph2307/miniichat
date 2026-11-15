@@ -1,4 +1,53 @@
-# MiniiChat
+# MiniiChat Lab — dictaphone + local speech recognition
+
+> Fork of [Minis233/miniichat](https://github.com/Minis233/miniichat), extended into a **dictaphone for scientists**:
+> record what you're doing at the bench, have it transcribed **on-device** with [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
+> add photos of the setup / samples / instrument screens, and send everything to any OpenAI-compatible LLM
+> that turns it into structured lab-notebook entries or project reports.
+
+### What this fork adds
+
+- **Dictaphone** — mic button next to the input. 16 kHz WAV recording with pause/resume, live level meter,
+  discard / done. Runs as a foreground service, so recording continues with the screen off.
+- **Local speech-to-text (whisper.cpp, JNI)** — no audio leaves the phone. Long recordings are processed in
+  5-minute chunks cut at silent points, with live progress and partial text. Cancel any time.
+- **Selectable Whisper model** — Settings → *Speech recognition*: download tiny / base / small / medium /
+  large-v3-turbo (full or quantized, multilingual or English-only) from Hugging Face, or **import any ggml `.bin`**
+  (e.g. a German fine-tune). Delete models to free space.
+- **Recognition options** — spoken language (auto, Deutsch, English, …), **glossary / vocabulary hint** for
+  technical terms (passed to whisper as initial prompt), CPU threads, translate-to-English, auto-transcribe.
+- **Transcribe existing audio files** (m4a, mp3, ogg, opus, flac, wav, …) — decoded and resampled on-device.
+- **Camera capture** — take a photo straight from the `+` menu and attach it.
+- **Voice + image to AI** — the transcript lands in the message box for editing; recordings are attached as playable
+  chips. Optionally also send the raw WAV as `input_audio` to audio-capable models.
+- **Science presets** — *Lab notebook* 🔬 (Objective / Materials / Procedure / Observations / Results / Next steps,
+  flags uncertain ASR terms with `[?]`, never invents numbers) and *Project report* 📋 assistants.
+- German UI strings for the new features; installs side-by-side with upstream (`com.miniichat.lab`).
+
+### Typical workflow
+
+1. Settings → Providers: add your LLM (a vision-capable model if you send photos).
+2. Settings → Speech recognition: download **Small (quantized)** or **Large v3 Turbo (quantized)**, set language,
+   add your field's jargon to the glossary.
+3. Settings → Assistants: select **Lab notebook**.
+4. In the chat: tap 🎤, describe the experiment, tap **Done** → transcript appears. `+` → *Take photo* of the setup.
+   Send. Edit/regenerate as needed; everything stays in local chat history.
+
+| Model | Size | Notes |
+| --- | --- | --- |
+| tiny-q5_1 | 31 MB | fastest, rough |
+| base-q5_1 | 57 MB | good quick default |
+| small-q5_1 | 181 MB | recommended for German / technical speech |
+| large-v3-turbo-q5_0 | 547 MB | best quality; needs a recent phone |
+
+Native code: `app/src/main/cpp/` (CMake fetches whisper.cpp `v1.7.4` at build time — the build needs internet and git).
+Kotlin: `audio/` (recorder, service, decoder, WAV I/O), `whisper/` (JNI, models, downloader, chunked transcriber),
+`ui/AudioUi.kt`, `ui/SpeechSettingsScreen.kt`.
+
+---
+
+## Upstream README
+
 
 A small, open-source Android chat client for any OpenAI-compatible LLM API. Native Kotlin + Jetpack Compose, no backend, bring your own keys.
 

@@ -25,6 +25,25 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.miniichat.audio.AudioDecoder
+import com.miniichat.audio.DictaphoneRecorder
+import com.miniichat.audio.FinishedRecording
+import com.miniichat.data.Attachment
+import com.miniichat.whisper.TranscribeOptions
+import com.miniichat.whisper.Transcriber
+import com.miniichat.whisper.WhisperModelManager
+import java.io.File
+
+/** UI state of an in-flight local transcription. */
+data class TranscriptionUi(
+    val attachmentUri: String,
+    val label: String,
+    val progress: Float = 0f,
+    val partial: String = "",
+    val phase: String = "transcribing"   // "decoding" | "loading" | "transcribing"
+)
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -67,6 +86,169 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val fetchingModelsFor: StateFlow<String?> = _fetchingModelsFor.asStateFlow()
 
     private var streamingJob: Job? = null
+
+    // ---------------- Dictaphone + local speech recognition ----------------
+
+    val modelManager = WhisperModelManager(app)
+    private val transcriber = Transcriber()
+    private var transcribeJob: Job? = null
+
+    private val _transcription = MutableStateFlow<TranscriptionUi?>(null)
+    val transcription: StateFlow<TranscriptionUi?> = _transcription.asStateFlow()
+
+    /** Finished transcript waiting to be merged into the chat input by the UI. */
+    private val _pendingTranscript = MutableStateFlow<Pair<String, String>?>(null) // uri to text
+    val pendingTranscript: StateFlow<Pair<String, String>?> = _pendingTranscript.asStateFlow()
+    fun consumePendingTranscript() { _pendingTranscript.value = null }
+
+    /** Attachment updates (e.g. transcript filled in) for attachments still in the composer. */
+    private val _attachmentUpdates = MutableStateFlow<Attachment?>(null)
+    val attachmentUpdates: StateFlow<Attachment?> = _attachmentUpdates.asStateFlow()
+    fun consumeAttachmentUpdate() { _attachmentUpdates.value = null }
+
+    fun recordingToAttachment(rec: FinishedRecording): Attachment = Attachment(
+        type = "audio",
+        uri = android.net.Uri.fromFile(rec.file).toString(),
+        mimeType = "audio/wav",
+        name = rec.file.name,
+        sizeBytes = rec.sizeBytes,
+        durationMs = rec.durationMs
+    )
+
+    private fun activeModelFile(): File? {
+        val name = settings.value.whisperModel
+        if (name.isBlank()) return null
+        val f = modelManager.fileFor(name)
+        return if (f.exists()) f else null
+    }
+
+    fun hasSpeechModel(): Boolean = activeModelFile() != null
+
+    /** Transcribe an audio attachment (16 kHz WAV) with the selected local whisper model. */
+    fun transcribe(att: Attachment) {
+        if (transcribeJob?.isActive == true) {
+            _toast.value = "A transcription is already running"
+            return
+        }
+        val model = activeModelFile()
+        if (model == null) {
+            _error.value = "No speech model installed. Open Settings → Speech recognition and download a Whisper model."
+            return
+        }
+        val path = android.net.Uri.parse(att.uri).path ?: return
+        val wav = File(path)
+        val s = settings.value
+        transcribeJob = viewModelScope.launch {
+            _transcription.value = TranscriptionUi(att.uri, att.name, phase = "loading")
+            try {
+                val text = transcriber.transcribeWav(
+                    modelFile = model,
+                    wav = wav,
+                    opts = TranscribeOptions(
+                        language = s.whisperLanguage,
+                        threads = s.whisperThreads,
+                        translate = s.whisperTranslate,
+                        initialPrompt = s.whisperPrompt
+                    ),
+                    onProgress = { p ->
+                        _transcription.value = _transcription.value?.copy(progress = p, phase = "transcribing")
+                    },
+                    onPartial = { t ->
+                        _transcription.value = _transcription.value?.copy(partial = t, phase = "transcribing")
+                    }
+                )
+                if (text.isBlank()) {
+                    _toast.value = "No speech recognised"
+                } else {
+                    _attachmentUpdates.value = att.copy(transcript = text)
+                    _pendingTranscript.value = att.uri to text
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _error.value = "Transcription failed: ${e.message}"
+            } finally {
+                _transcription.value = null
+            }
+        }
+    }
+
+    fun cancelTranscription() {
+        transcriber.abort()
+        transcribeJob?.cancel()
+        transcribeJob = null
+        _transcription.value = null
+    }
+
+    /** Called by the UI when the dictaphone stops. */
+    fun onRecordingFinished(rec: FinishedRecording, autoTranscribe: Boolean, add: (Attachment) -> Unit) {
+        val att = recordingToAttachment(rec)
+        add(att)
+        if (autoTranscribe && settings.value.autoTranscribe) {
+            if (hasSpeechModel()) transcribe(att)
+            else _toast.value = "Recording saved. Install a Whisper model to transcribe it."
+        }
+    }
+
+    /** Import an existing audio file: decode to 16 kHz WAV, attach it, optionally transcribe. */
+    fun importAudio(uri: android.net.Uri, add: (Attachment) -> Unit) {
+        if (transcribeJob?.isActive == true) {
+            _toast.value = "Please wait for the running transcription"
+            return
+        }
+        val app = getApplication<Application>()
+        transcribeJob = viewModelScope.launch {
+            val (name, _) = com.miniichat.util.AttachmentLoader.queryNameSize(app.contentResolver, uri)
+            _transcription.value = TranscriptionUi(uri.toString(), name, phase = "decoding")
+            try {
+                val stem = name.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9._-]"), "_").take(40)
+                val out = File(DictaphoneRecorder.recordingsDir(app),
+                    "import_${System.currentTimeMillis()}_$stem.wav")
+                val durationMs = withContext(Dispatchers.IO) {
+                    AudioDecoder.decodeToWav(app, uri, out) { p ->
+                        _transcription.value = _transcription.value?.copy(progress = p)
+                    }
+                }
+                val att = recordingToAttachment(FinishedRecording(out, durationMs, out.length()))
+                    .copy(name = name)
+                add(att)
+                _transcription.value = null
+                transcribeJob = null
+                if (settings.value.autoTranscribe && hasSpeechModel()) transcribe(att)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _error.value = "Could not import audio: ${e.message}"
+                _transcription.value = null
+            }
+        }
+    }
+
+    fun recordingsUsage(): Pair<Int, Long> {
+        val files = DictaphoneRecorder.recordingsDir(getApplication()).listFiles()?.toList().orEmpty()
+        return files.size to files.sumOf { it.length() }
+    }
+
+    /** Deletes recordings not referenced by any saved conversation. */
+    fun deleteUnusedRecordings() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val used = store.snapshot().flatMap { c -> c.messages.flatMap { m -> m.attachments } }
+                .mapNotNull { android.net.Uri.parse(it.uri).path }.toSet()
+            var n = 0
+            DictaphoneRecorder.recordingsDir(getApplication()).listFiles()?.forEach { f ->
+                if (f.absolutePath !in used && DictaphoneRecorder.state.value.file != f) {
+                    if (f.delete()) n++
+                }
+            }
+            _toast.value = "Deleted $n unused recordings"
+        }
+    }
+
+    override fun onCleared() {
+        cancelTranscription()
+        transcriber.release()
+        super.onCleared()
+    }
 
     fun selectConversation(id: String?) { _activeId.value = id }
 
@@ -279,52 +461,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             updated.messages
                 .filter { !(it.role == "assistant" && it.content.isEmpty()) }
                 .forEach { msg ->
-                    val imgs = msg.attachments.filter { it.type == "image" }
-                    if (msg.role == "user" && imgs.isNotEmpty()) {
-                        // Build multipart content: text + image_url parts.
-                        val parts = mutableListOf<com.miniichat.api.ChatPart>()
-                        if (msg.content.isNotBlank()) {
-                            parts.add(com.miniichat.api.ChatPart(type = "text", text = msg.content))
-                        }
-                        for (att in imgs) {
-                            // Try to load + base64-encode the image. Fall back silently if it fails.
-                            val loaded = runCatching {
-                                com.miniichat.util.AttachmentLoader.load(
-                                    resolver = getApplication<android.app.Application>().contentResolver,
-                                    uri = android.net.Uri.parse(att.uri),
-                                    mimeFallback = att.mimeType.ifBlank { "image/jpeg" }
-                                )
-                            }.getOrNull() ?: continue
-                            val dataUrl = "data:${loaded.mimeType};base64,${loaded.base64}"
-                            parts.add(com.miniichat.api.ChatPart(
-                                type = "image_url",
-                                imageUrl = com.miniichat.api.ChatPart.ImageUrl(url = dataUrl)
-                            ))
-                        }
-                        // Also describe non-image attachments as text references.
-                        val others = msg.attachments.filter { it.type != "image" }
-                        if (others.isNotEmpty()) {
-                            val tail = others.joinToString("\n") { "[file: ${it.name} (${it.mimeType})]" }
-                            val merged = if (parts.firstOrNull()?.type == "text") {
-                                parts[0] = com.miniichat.api.ChatPart(
-                                    type = "text",
-                                    text = (parts[0].text ?: "") + "\n\n" + tail
-                                )
-                                parts
-                            } else {
-                                listOf(com.miniichat.api.ChatPart(type = "text", text = tail)) + parts
-                            }
-                            historyForApi.add(ChatMessage(msg.role, msg.content, merged))
-                        } else {
-                            historyForApi.add(ChatMessage(msg.role, msg.content, parts))
-                        }
-                    } else if (msg.role == "user" && msg.attachments.isNotEmpty()) {
-                        // Files only — describe inline as text refs.
-                        val refs = msg.attachments.joinToString("\n") {
-                            "[file: ${it.name} (${it.mimeType})]"
-                        }
-                        val combined = if (msg.content.isBlank()) refs else "${msg.content}\n\n$refs"
-                        historyForApi.add(ChatMessage(msg.role, combined))
+                    if (msg.role == "user" && msg.attachments.isNotEmpty()) {
+                        historyForApi.add(buildUserMessage(msg, current.sendAudioToModel))
                     } else {
                         historyForApi.add(ChatMessage(msg.role, msg.content))
                     }
@@ -368,6 +506,70 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    /**
+     * Build an API message from a user message with attachments:
+     * images → image_url parts, audio → transcript text (+ optional input_audio part),
+     * other files → filename references.
+     */
+    private fun buildUserMessage(msg: Message, sendAudio: Boolean): ChatMessage {
+        val resolver = getApplication<Application>().contentResolver
+        val parts = mutableListOf<com.miniichat.api.ChatPart>()
+        val notes = mutableListOf<String>()
+
+        for (att in msg.attachments) {
+            when (att.type) {
+                "image" -> {
+                    val loaded = runCatching {
+                        com.miniichat.util.AttachmentLoader.load(
+                            resolver, android.net.Uri.parse(att.uri), att.mimeType.ifBlank { "image/jpeg" }
+                        )
+                    }.getOrNull()
+                    if (loaded != null) {
+                        parts.add(com.miniichat.api.ChatPart(
+                            type = "image_url",
+                            imageUrl = com.miniichat.api.ChatPart.ImageUrl(
+                                url = "data:${loaded.mimeType};base64,${loaded.base64}"
+                            )
+                        ))
+                    } else notes.add("[image unavailable: ${att.name}]")
+                }
+                "audio" -> {
+                    val dur = com.miniichat.util.formatDuration(att.durationMs)
+                    // Only add the transcript if the user didn't already paste it into the message.
+                    val t = att.transcript?.trim().orEmpty()
+                    if (t.isNotEmpty() && !msg.content.contains(t.take(60))) {
+                        notes.add("[voice recording ${att.name}, $dur — transcript]:\n$t")
+                    } else {
+                        notes.add("[voice recording ${att.name}, $dur]")
+                    }
+                    if (sendAudio) {
+                        val loaded = runCatching {
+                            com.miniichat.util.AttachmentLoader.load(
+                                resolver, android.net.Uri.parse(att.uri), "audio/wav"
+                            )
+                        }.getOrNull()
+                        if (loaded != null) {
+                            parts.add(com.miniichat.api.ChatPart(
+                                type = "input_audio",
+                                inputAudio = com.miniichat.api.ChatPart.InputAudio(data = loaded.base64, format = "wav")
+                            ))
+                        } else notes.add("(audio too large to upload, transcript only)")
+                    }
+                }
+                else -> notes.add("[file: ${att.name} (${att.mimeType})]")
+            }
+        }
+
+        val text = listOf(msg.content, notes.joinToString("\n\n"))
+            .filter { it.isNotBlank() }
+            .joinToString("\n\n")
+        if (parts.isEmpty()) return ChatMessage(msg.role, text)
+        val all = mutableListOf<com.miniichat.api.ChatPart>()
+        if (text.isNotBlank()) all.add(com.miniichat.api.ChatPart(type = "text", text = text))
+        all.addAll(parts)
+        return ChatMessage(msg.role, text, all)
     }
 
     private suspend fun appendAssistant(convId: String, msgId: String, content: String) {

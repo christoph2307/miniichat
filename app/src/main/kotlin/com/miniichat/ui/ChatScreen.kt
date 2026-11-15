@@ -92,10 +92,33 @@ fun ChatScreen(
     onEditMessage: (String, String) -> Unit = { _, _ -> },
     onNew: () -> Unit,
     onOpenSettings: () -> Unit,
-    onPickModel: () -> Unit
+    onPickModel: () -> Unit,
+    transcription: com.miniichat.TranscriptionUi? = null,
+    pendingTranscript: Pair<String, String>? = null,
+    onConsumeTranscript: () -> Unit = {},
+    attachmentUpdate: com.miniichat.data.Attachment? = null,
+    onConsumeAttachmentUpdate: () -> Unit = {},
+    hasSpeechModel: Boolean = false,
+    onRecordingFinished: (com.miniichat.audio.FinishedRecording, Boolean, (com.miniichat.data.Attachment) -> Unit) -> Unit = { _, _, _ -> },
+    onImportAudio: (android.net.Uri, (com.miniichat.data.Attachment) -> Unit) -> Unit = { _, _ -> },
+    onTranscribe: (com.miniichat.data.Attachment) -> Unit = {},
+    onCancelTranscription: () -> Unit = {}
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf<List<com.miniichat.data.Attachment>>(emptyList()) }
+    val playback = rememberAudioPlayback()
+
+    // Merge finished local transcripts into the draft so they can be edited before sending.
+    LaunchedEffect(pendingTranscript) {
+        val t = pendingTranscript ?: return@LaunchedEffect
+        input = if (input.isBlank()) t.second else input.trimEnd() + "\n\n" + t.second
+        onConsumeTranscript()
+    }
+    LaunchedEffect(attachmentUpdate) {
+        val u = attachmentUpdate ?: return@LaunchedEffect
+        pendingAttachments = pendingAttachments.map { if (it.uri == u.uri) u else it }
+        onConsumeAttachmentUpdate()
+    }
     val listState = rememberLazyListState()
     val rawMessages = conversation?.messages ?: emptyList()
     // Apply in-memory streaming overlay so the assistant message updates per-token
@@ -145,6 +168,7 @@ fun ChatScreen(
                 items(messages, key = { it.id }) { msg ->
                     MessageItem(
                         message = msg,
+                        playback = playback,
                         senderLabel = if (msg.role == "user") "You"
                         else settings.activeModel.ifBlank { activeProvider?.name ?: "Assistant" },
                         isLastAssistant = msg.id == messages.lastOrNull()?.id && msg.role == "assistant",
@@ -206,6 +230,10 @@ fun ChatScreen(
             }
         }
 
+        if (transcription != null) {
+            TranscriptionBanner(state = transcription, onCancel = onCancelTranscription)
+        }
+
         InputBar(
             value = input,
             onValueChange = { input = it },
@@ -220,7 +248,17 @@ fun ChatScreen(
             },
             onStop = onStop,
             isStreaming = isStreaming,
-            enabled = activeProvider != null && settings.activeModel.isNotBlank()
+            enabled = activeProvider != null && settings.activeModel.isNotBlank(),
+            playback = playback,
+            autoTranscribe = settings.autoTranscribe,
+            hasSpeechModel = hasSpeechModel,
+            onRecordingFinished = { rec, tr ->
+                onRecordingFinished(rec, tr) { att -> pendingAttachments = pendingAttachments + att }
+            },
+            onImportAudio = { uri ->
+                onImportAudio(uri) { att -> pendingAttachments = pendingAttachments + att }
+            },
+            onTranscribe = onTranscribe
         )
     }
 }
@@ -317,6 +355,7 @@ private fun ChatTopBar(
 @Composable
 private fun MessageItem(
     message: Message,
+    playback: AudioPlayback,
     senderLabel: String,
     isLastAssistant: Boolean,
     isStreaming: Boolean,
@@ -333,6 +372,7 @@ private fun MessageItem(
     if (isUser) {
         UserBubble(
             message = message,
+            playback = playback,
             editing = editing,
             editingDraft = editingDraft,
             onEditingDraftChange = onEditingDraftChange,
@@ -357,6 +397,7 @@ private fun MessageItem(
 @Composable
 private fun UserBubble(
     message: Message,
+    playback: AudioPlayback,
     editing: Boolean,
     editingDraft: String,
     onEditingDraftChange: (String) -> Unit,
@@ -383,6 +424,20 @@ private fun UserBubble(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     message.attachments.forEach { att ->
+                        if (att.type == "audio") {
+                            Column(horizontalAlignment = Alignment.End) {
+                                AudioAttachmentChip(
+                                    att = att,
+                                    playback = playback,
+                                    container = MaterialTheme.colorScheme.primaryContainer,
+                                    content = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                val t = att.transcript
+                                if (!t.isNullOrBlank() && !message.content.contains(t.take(60))) {
+                                    TranscriptPreview(t, MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        } else {
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
@@ -406,6 +461,7 @@ private fun UserBubble(
                                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                 maxLines = 1
                             )
+                        }
                         }
                     }
                 }
