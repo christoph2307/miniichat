@@ -325,7 +325,9 @@ private fun EmbedBlock(block: Block.Embed, ctx: InlineCtx) {
     val target = block.target
     val isImage = Regex("(?i)\\.(png|jpe?g|webp|gif|bmp|heic)$").containsMatchIn(target)
     val file = ctx.actions.resolveAsset?.invoke(target)
-    if (isImage && file != null && file.exists()) {
+    if (com.miniichat.wiki.WikiMerge.isAudio(target) && file != null && file.exists()) {
+        AudioFileChip(file)
+    } else if (isImage && file != null && file.exists()) {
         val bmp by produceState<ImageBitmap?>(null, file.absolutePath) {
             value = withContext(Dispatchers.IO) { decodeSampled(file, 1280) }
         }
@@ -699,4 +701,20 @@ private fun parseInline(text: String, ctx: InlineCtx): AnnotatedString = buildAn
         }
         append(c); i++
     }
+}
+
+/** Playable recording embedded in a note (`![[rec_….wav]]`). */
+@Composable
+private fun AudioFileChip(file: File) {
+    val pb = rememberAudioPlayback()
+    val duration = remember(file.absolutePath) {
+        com.miniichat.audio.WavIO.readInfo(file)?.durationMs ?: 0L
+    }
+    AudioAttachmentChip(
+        att = com.miniichat.data.Attachment(
+            type = "audio", uri = android.net.Uri.fromFile(file).toString(), mimeType = "audio/wav",
+            name = file.name, sizeBytes = file.length(), durationMs = duration
+        ),
+        playback = pb
+    )
 }

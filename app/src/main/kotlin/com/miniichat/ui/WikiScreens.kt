@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -401,7 +402,8 @@ fun NoteScreen(
     onApplyAi: (Set<String>, Boolean, Boolean, Boolean, Boolean) -> Unit,
     onDelete: () -> Unit,
     onExport: () -> Unit,
-    onAppLink: (String) -> Unit = {}
+    onAppLink: (String) -> Unit = {},
+    onContinueInChat: () -> Unit = {}
 ) {
     var editing by rememberSaveable(note.id) { mutableStateOf(note.body.isBlank()) }
     var title by rememberSaveable(note.id) { mutableStateOf(note.title) }
@@ -460,6 +462,9 @@ fun NoteScreen(
             Box {
                 IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, contentDescription = "more") }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.wiki_continue_chat)) },
+                        leadingIcon = { Icon(Icons.Default.Mic, null) },
+                        onClick = { menuOpen = false; if (editing) { commit(); editing = false }; onContinueInChat() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.wiki_autolink)) },
                         leadingIcon = { Icon(Icons.Default.Link, null) },
                         onClick = { menuOpen = false; if (editing) { commit(); editing = false }; onAutoLink() })
@@ -540,6 +545,11 @@ fun NoteScreen(
                     }
                 }
                 Spacer(Modifier.height(16.dp))
+                TextButton(onClick = onContinueInChat) {
+                    Icon(Icons.Default.Mic, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.wiki_continue_chat))
+                }
                 TextButton(onClick = onAiLinks) {
                     Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))

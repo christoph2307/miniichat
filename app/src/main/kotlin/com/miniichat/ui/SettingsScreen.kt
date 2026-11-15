@@ -266,6 +266,8 @@ fun SettingsScreen(
                         settings.wikiAutoLinkOnSave) { v -> onChange { it.copy(wikiAutoLinkOnSave = v) } }
                     WikiToggle(stringResource(R.string.wiki_set_images), "",
                         settings.wikiSaveImages) { v -> onChange { it.copy(wikiSaveImages = v) } }
+                    WikiToggle(stringResource(R.string.wiki_set_audio), "",
+                        settings.wikiSaveAudio) { v -> onChange { it.copy(wikiSaveAudio = v) } }
                     WikiToggle(stringResource(R.string.wiki_set_transcript), "",
                         settings.wikiSaveTranscript) { v -> onChange { it.copy(wikiSaveTranscript = v) } }
                     Spacer(Modifier.height(10.dp))

@@ -47,6 +47,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -119,7 +121,9 @@ fun InputBar(
         } else requestPerms.launch(perms.toTypedArray())
     }
 
-    if (showRecorder) {
+    // keep showing the dictaphone if a recording is still running (e.g. after visiting Settings)
+    val recState by com.miniichat.audio.DictaphoneRecorder.state.collectAsState()
+    if (showRecorder || recState.status != com.miniichat.audio.RecorderStatus.Idle) {
         RecorderSheet(
             autoTranscribe = autoTranscribe,
             hasModel = hasSpeechModel,
@@ -129,24 +133,26 @@ fun InputBar(
     }
 
     // --- camera capture (no CAMERA permission needed: uses the system camera app) ---
-    var pendingPhoto by remember { mutableStateOf<Pair<Uri, File>?>(null) }
+    // path survives activity/process recreation while the camera app is in front
+    var pendingPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val p = pendingPhoto
-        pendingPhoto = null
-        if (ok && p != null && p.second.length() > 0) {
+        val f = pendingPhotoPath?.let { File(it) }
+        pendingPhotoPath = null
+        if (ok && f != null && f.length() > 0) {
+            val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
             onAttachmentsChange(attachments + Attachment(
-                type = "image", uri = p.first.toString(), mimeType = "image/jpeg",
-                name = p.second.name, sizeBytes = p.second.length()
+                type = "image", uri = uri.toString(), mimeType = "image/jpeg",
+                name = f.name, sizeBytes = f.length()
             ))
-        } else p?.second?.delete()
+        } else f?.delete()
     }
     fun launchCamera() {
         val dir = File(ctx.filesDir, "photos").apply { mkdirs() }
         val f = File(dir, "photo_${System.currentTimeMillis()}.jpg")
         val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
-        pendingPhoto = uri to f
+        pendingPhotoPath = f.absolutePath
         runCatching { takePhoto.launch(uri) }.onFailure {
-            pendingPhoto = null
+            pendingPhotoPath = null
             android.widget.Toast.makeText(ctx, it.message ?: "No camera app", android.widget.Toast.LENGTH_LONG).show()
         }
     }

@@ -147,9 +147,13 @@ class WikiStore(val root: File) {
         }
     }
 
+    /** Link-safe asset file name. */
+    fun cleanAssetName(preferredName: String): String =
+        preferredName.substringAfterLast('/').replace(Regex("[\\[\\]|#^\\\\:*?\"<>\\s]+"), "_").ifBlank { "file" }
+
     /** Copy a file into assets with a unique, link-safe name and return that name. */
     suspend fun addAsset(input: InputStream, preferredName: String): String = withContext(Dispatchers.IO) {
-        val clean = preferredName.substringAfterLast('/').replace(Regex("[\\[\\]|#^\\\\:*?\"<>\\s]+"), "_").ifBlank { "file" }
+        val clean = cleanAssetName(preferredName)
         val stem = clean.substringBeforeLast('.', clean)
         val ext = clean.substringAfterLast('.', "").let { if (it.isNotEmpty() && it != clean) ".$it" else "" }
         var name = clean

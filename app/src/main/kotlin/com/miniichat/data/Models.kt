@@ -36,5 +36,7 @@ data class Conversation(
     /** Hidden from the main chat list (e.g. after its result was accepted into the wiki). */
     val archived: Boolean = false,
     /** Wiki note created from this chat, if any. */
-    val wikiNoteId: String? = null
+    val wikiNoteId: String? = null,
+    /** This chat extends an existing page: replies are full updated pages, Accept updates that note. */
+    val updatesNoteId: String? = null
 )

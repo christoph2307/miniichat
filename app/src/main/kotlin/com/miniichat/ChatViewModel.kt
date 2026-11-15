@@ -66,7 +66,9 @@ data class TranscriptionUi(
     val label: String,
     val progress: Float = 0f,
     val partial: String = "",
-    val phase: String = "transcribing"   // "decoding" | "loading" | "transcribing"
+    val phase: String = "transcribing",  // "decoding" | "loading" | "transcribing"
+    /** further recordings waiting in the queue */
+    val queued: Int = 0
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -117,20 +119,53 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     val modelManager = WhisperModelManager(app)
     private val transcriber = Transcriber()
-    private var transcribeJob: Job? = null
 
     private val _transcription = MutableStateFlow<TranscriptionUi?>(null)
     val transcription: StateFlow<TranscriptionUi?> = _transcription.asStateFlow()
 
-    /** Finished transcript waiting to be merged into the chat input by the UI. */
-    private val _pendingTranscript = MutableStateFlow<Pair<String, String>?>(null) // uri to text
-    val pendingTranscript: StateFlow<Pair<String, String>?> = _pendingTranscript.asStateFlow()
-    fun consumePendingTranscript() { _pendingTranscript.value = null }
+    // ── drafts: unsent text + attachments per chat, persisted ──
+    private val draftStore = com.miniichat.data.DraftStore(app)
+    private val _drafts = MutableStateFlow(draftStore.loadAll())
+    private var draftSaveJob: Job? = null
 
-    /** Attachment updates (e.g. transcript filled in) for attachments still in the composer. */
-    private val _attachmentUpdates = MutableStateFlow<Attachment?>(null)
-    val attachmentUpdates: StateFlow<Attachment?> = _attachmentUpdates.asStateFlow()
-    fun consumeAttachmentUpdate() { _attachmentUpdates.value = null }
+    init {
+        // reopen the chat that was open before the app was killed (standby, low memory, …)
+        draftStore.lastActiveId?.let { if (_activeId.value == null) _activeId.value = it }
+        viewModelScope.launch { _activeId.collect { draftStore.lastActiveId = it } }
+    }
+
+    fun draftKey(id: String? = _activeId.value): String = id ?: com.miniichat.data.DraftStore.NEW_CHAT
+
+    val draft: StateFlow<com.miniichat.data.Draft> = kotlinx.coroutines.flow.combine(_activeId, _drafts) { id, m ->
+        m[draftKey(id)] ?: com.miniichat.data.Draft()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, _drafts.value[draftKey()] ?: com.miniichat.data.Draft())
+
+    private fun updateDraft(key: String = draftKey(), transform: (com.miniichat.data.Draft) -> com.miniichat.data.Draft) {
+        val cur = _drafts.value
+        _drafts.value = cur + (key to transform(cur[key] ?: com.miniichat.data.Draft()))
+        draftSaveJob?.cancel()
+        draftSaveJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(300)
+            draftStore.saveAll(_drafts.value)
+        }
+    }
+
+    fun setDraftText(text: String) = updateDraft { it.copy(text = text) }
+    fun setDraftAttachments(list: List<Attachment>) = updateDraft { it.copy(attachments = list) }
+
+    /** Send the current draft and clear it. */
+    fun sendDraft() {
+        val key = draftKey()
+        val d = _drafts.value[key] ?: return
+        if (d.isEmpty) return
+        if (_isStreaming.value) return
+        _drafts.value = _drafts.value - key
+        draftStore.saveAll(_drafts.value)
+        sendMessage(d.text, d.attachments)
+    }
+
+    /** Persist immediately (called when the app goes to background). */
+    fun flushDrafts() { draftSaveJob?.cancel(); draftStore.saveAll(_drafts.value) }
 
     fun recordingToAttachment(rec: FinishedRecording): Attachment = Attachment(
         type = "audio",
@@ -150,115 +185,136 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun hasSpeechModel(): Boolean = activeModelFile() != null
 
-    /** Transcribe an audio attachment (16 kHz WAV) with the selected local whisper model. */
-    fun transcribe(att: Attachment) {
-        if (transcribeJob?.isActive == true) {
-            _toast.value = "A transcription is already running"
-            return
-        }
-        val model = activeModelFile()
-        if (model == null) {
-            _error.value = "No speech model installed. Open Settings → Speech recognition and download a Whisper model."
-            return
-        }
-        val path = android.net.Uri.parse(att.uri).path ?: return
-        val wav = File(path)
-        val s = settings.value
-        transcribeJob = viewModelScope.launch {
-            _transcription.value = TranscriptionUi(att.uri, att.name, phase = "loading")
-            val started = android.os.SystemClock.elapsedRealtime()
-            try {
-                val text = transcriber.transcribeWav(
-                    modelFile = model,
-                    wav = wav,
-                    opts = TranscribeOptions(
-                        language = s.whisperLanguage,
-                        threads = s.whisperThreads,
-                        translate = s.whisperTranslate,
-                        initialPrompt = s.whisperPrompt
-                    ),
-                    onProgress = { p ->
-                        _transcription.value = _transcription.value?.copy(progress = p, phase = "transcribing")
-                    },
-                    onPartial = { t ->
-                        _transcription.value = _transcription.value?.copy(partial = t, phase = "transcribing")
-                    }
-                )
-                val elapsed = android.os.SystemClock.elapsedRealtime() - started
-                val audioMs = att.durationMs.takeIf { it > 0 }
-                    ?: com.miniichat.audio.WavIO.readInfo(wav)?.durationMs ?: 0L
-                val engine = if (com.miniichat.whisper.WhisperLib.hasGpuDevice()) "GPU" else "CPU"
-                val speed = if (elapsed > 0 && audioMs > 0) "%.1f× realtime".format(audioMs.toDouble() / elapsed) else ""
-                val summary = "${com.miniichat.util.formatDuration(audioMs)} audio in ${com.miniichat.util.formatDuration(elapsed)}" +
-                    (if (speed.isNotEmpty()) " · $speed" else "") + " · $engine · " +
-                    model.name.removePrefix("ggml-").removeSuffix(".bin")
-                com.miniichat.whisper.WhisperLib.lastRunSummary = summary
-                if (text.isBlank()) {
-                    _toast.value = "No speech recognised ($summary)"
-                } else {
-                    _toast.value = "Transcribed: $summary"
-                    _attachmentUpdates.value = att.copy(transcript = text)
-                    _pendingTranscript.value = att.uri to text
+    // ── transcription queue: several recordings are processed one after another ──
+    private data class TxJob(val draftKey: String, val att: Attachment?, val importUri: android.net.Uri? = null)
+    private val txQueue = ArrayDeque<TxJob>()
+    private var txWorker: Job? = null
+
+    private fun enqueue(job: TxJob) {
+        txQueue.addLast(job)
+        _transcription.value = _transcription.value?.copy(queued = txQueue.size)
+        if (txWorker?.isActive != true) {
+            txWorker = viewModelScope.launch {
+                while (true) {
+                    val j = txQueue.removeFirstOrNull() ?: break
+                    runJob(j)
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _error.value = "Transcription failed: ${e.message}"
-            } finally {
                 _transcription.value = null
             }
         }
     }
 
+    /** Transcribe an audio attachment (16 kHz WAV) with the selected local whisper model. */
+    fun transcribe(att: Attachment, key: String = draftKey()) {
+        if (activeModelFile() == null) {
+            _error.value = "No speech model installed. Open Settings → Speech recognition and download a Whisper model."
+            return
+        }
+        if (txQueue.any { it.att?.uri == att.uri } || _transcription.value?.attachmentUri == att.uri) return
+        enqueue(TxJob(key, att))
+    }
+
+    private suspend fun runJob(job: TxJob) {
+        val app = getApplication<Application>()
+        var att = job.att
+        // 1) imported file → decode to 16 kHz WAV first
+        if (job.importUri != null) {
+            val (name, _) = com.miniichat.util.AttachmentLoader.queryNameSize(app.contentResolver, job.importUri)
+            _transcription.value = TranscriptionUi(job.importUri.toString(), name, phase = "decoding", queued = txQueue.size)
+            try {
+                val stem = name.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9._-]"), "_").take(40)
+                val out = File(DictaphoneRecorder.recordingsDir(app), "import_${System.currentTimeMillis()}_$stem.wav")
+                val durationMs = withContext(Dispatchers.IO) {
+                    AudioDecoder.decodeToWav(app, job.importUri, out) { p ->
+                        _transcription.value = _transcription.value?.copy(progress = p)
+                    }
+                }
+                att = recordingToAttachment(FinishedRecording(out, durationMs, out.length())).copy(name = name)
+                val a = att
+                updateDraft(job.draftKey) { it.copy(attachments = it.attachments + a) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _error.value = "Could not import audio: ${e.message}"
+                return
+            }
+            if (!(settings.value.autoTranscribe && hasSpeechModel())) return
+        }
+        val a = att ?: return
+        val model = activeModelFile() ?: return
+        val wav = File(android.net.Uri.parse(a.uri).path ?: return)
+        val s = settings.value
+        _transcription.value = TranscriptionUi(a.uri, a.name, phase = "loading", queued = txQueue.size)
+        val started = android.os.SystemClock.elapsedRealtime()
+        try {
+            val text = transcriber.transcribeWav(
+                modelFile = model,
+                wav = wav,
+                opts = TranscribeOptions(
+                    language = s.whisperLanguage,
+                    threads = s.whisperThreads,
+                    translate = s.whisperTranslate,
+                    initialPrompt = s.whisperPrompt
+                ),
+                onProgress = { p ->
+                    _transcription.value = _transcription.value?.copy(progress = p, phase = "transcribing", queued = txQueue.size)
+                },
+                onPartial = { t ->
+                    _transcription.value = _transcription.value?.copy(partial = t, phase = "transcribing", queued = txQueue.size)
+                }
+            )
+            val elapsed = android.os.SystemClock.elapsedRealtime() - started
+            val audioMs = a.durationMs.takeIf { it > 0 } ?: com.miniichat.audio.WavIO.readInfo(wav)?.durationMs ?: 0L
+            val engine = if (com.miniichat.whisper.WhisperLib.hasGpuDevice()) "GPU" else "CPU"
+            val speed = if (elapsed > 0 && audioMs > 0) "%.1f× realtime".format(audioMs.toDouble() / elapsed) else ""
+            val summary = "${com.miniichat.util.formatDuration(audioMs)} audio in ${com.miniichat.util.formatDuration(elapsed)}" +
+                (if (speed.isNotEmpty()) " · $speed" else "") + " · $engine · " +
+                model.name.removePrefix("ggml-").removeSuffix(".bin")
+            com.miniichat.whisper.WhisperLib.lastRunSummary = summary
+            if (text.isBlank()) {
+                _toast.value = "No speech recognised ($summary)"
+            } else {
+                _toast.value = "Transcribed: $summary"
+                // write straight into the draft the recording belongs to (works even if the chat isn't open)
+                updateDraft(job.draftKey) { d ->
+                    val audios = d.attachments.filter { it.type == "audio" }
+                    val n = audios.indexOfFirst { it.uri == a.uri }.let { if (it < 0) audios.size + 1 else it + 1 }
+                    val label = "🎙 Recording $n (${com.miniichat.util.formatDuration(audioMs)}):\n"
+                    d.copy(
+                        text = if (d.text.isBlank()) label + text else d.text.trimEnd() + "\n\n" + label + text,
+                        attachments = d.attachments.map { if (it.uri == a.uri) it.copy(transcript = text) else it }
+                    )
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _error.value = "Transcription failed: ${e.message}"
+        }
+    }
+
     fun cancelTranscription() {
+        txQueue.clear()
         transcriber.abort()
-        transcribeJob?.cancel()
-        transcribeJob = null
+        txWorker?.cancel()
+        txWorker = null
         _transcription.value = null
     }
 
-    /** Called by the UI when the dictaphone stops. */
-    fun onRecordingFinished(rec: FinishedRecording, autoTranscribe: Boolean, add: (Attachment) -> Unit) {
+    /** Called by the UI when the dictaphone stops: attach to the current draft (+ queue transcription). */
+    fun onRecordingFinished(rec: FinishedRecording, autoTranscribe: Boolean) {
+        val key = draftKey()
         val att = recordingToAttachment(rec)
-        add(att)
+        updateDraft(key) { it.copy(attachments = it.attachments + att) }
         if (autoTranscribe && settings.value.autoTranscribe) {
-            if (hasSpeechModel()) transcribe(att)
+            if (hasSpeechModel()) transcribe(att, key)
             else _toast.value = "Recording saved. Install a Whisper model to transcribe it."
         }
     }
 
     /** Import an existing audio file: decode to 16 kHz WAV, attach it, optionally transcribe. */
-    fun importAudio(uri: android.net.Uri, add: (Attachment) -> Unit) {
-        if (transcribeJob?.isActive == true) {
-            _toast.value = "Please wait for the running transcription"
-            return
-        }
-        val app = getApplication<Application>()
-        transcribeJob = viewModelScope.launch {
-            val (name, _) = com.miniichat.util.AttachmentLoader.queryNameSize(app.contentResolver, uri)
-            _transcription.value = TranscriptionUi(uri.toString(), name, phase = "decoding")
-            try {
-                val stem = name.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9._-]"), "_").take(40)
-                val out = File(DictaphoneRecorder.recordingsDir(app),
-                    "import_${System.currentTimeMillis()}_$stem.wav")
-                val durationMs = withContext(Dispatchers.IO) {
-                    AudioDecoder.decodeToWav(app, uri, out) { p ->
-                        _transcription.value = _transcription.value?.copy(progress = p)
-                    }
-                }
-                val att = recordingToAttachment(FinishedRecording(out, durationMs, out.length()))
-                    .copy(name = name)
-                add(att)
-                _transcription.value = null
-                transcribeJob = null
-                if (settings.value.autoTranscribe && hasSpeechModel()) transcribe(att)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _error.value = "Could not import audio: ${e.message}"
-                _transcription.value = null
-            }
-        }
+    fun importAudio(uri: android.net.Uri) {
+        enqueue(TxJob(draftKey(), null, uri))
     }
 
     fun recordingsUsage(): Pair<Int, Long> {
@@ -320,6 +376,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * frontmatter/H1 → title/folder/tags, photos of the preceding prompt → assets + embeds,
      * optional raw transcript, then local auto-linking. Saving the same message again updates the note.
      */
+    /** Copy an attachment into the wiki assets once (re-saving reuses the same file). */
+    private suspend fun assetFor(att: Attachment): String? = runCatching {
+        val clean = wikiStore.cleanAssetName(att.name)
+        val existing = wikiStore.assetFile(clean)
+        if (existing.exists() && (att.sizeBytes <= 0 || existing.length() == att.sizeBytes)) return clean
+        getApplication<Application>().contentResolver.openInputStream(android.net.Uri.parse(att.uri))!!.use {
+            wikiStore.addAsset(it, att.name)
+        }
+    }.getOrNull()
+
+    /**
+     * Save an assistant reply as a wiki note.
+     *  - normal chat: frontmatter/H1 → title/folder/tags; re-saving the same reply updates its note
+     *  - chat started with "Add to this page" (updatesNoteId): the reply is the full updated page,
+     *    merged into that note so no image, recording or source is lost
+     * Photos and recordings from all prompts of the chat are copied into the note.
+     */
     fun saveMessageToWiki(messageId: String, archive: Boolean = false) {
         viewModelScope.launch {
             val convId = _activeId.value ?: return@launch
@@ -327,57 +400,74 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val idx = conv.messages.indexOfFirst { it.id == messageId }
             if (idx < 0) return@launch
             val msg = conv.messages[idx]
-            val prompt = conv.messages.subList(0, idx).lastOrNull { it.role == "user" }
+            val prompts = conv.messages.subList(0, idx).filter { it.role == "user" }
             val s = settings.value
             val source = "chat:$convId/$messageId"
-            val existing = wikiStore.findBySource(source)
+            val target = conv.updatesNoteId?.let { wikiStore.get(it) }
+            val existing = target ?: wikiStore.findBySource(source)
 
             val parsed = Frontmatter.toNote(unwrapFence(msg.content), existing?.id ?: WikiStore.newId(), conv.title.ifBlank { "Note" })
-            var body = parsed.body.trim()
+            var body = if (target != null) com.miniichat.wiki.WikiMerge.mergeUpdate(target.body, parsed.body.trim())
+                       else parsed.body.trim()
 
-            if (prompt != null && s.wikiSaveImages) {
-                val embeds = mutableListOf<String>()
-                for (att in prompt.attachments.filter { it.type == "image" }) {
-                    val name = runCatching {
-                        getApplication<Application>().contentResolver.openInputStream(android.net.Uri.parse(att.uri))!!.use {
-                            wikiStore.addAsset(it, att.name)
-                        }
-                    }.getOrNull() ?: continue
-                    embeds.add("![[$name]]")
-                }
-                if (embeds.isNotEmpty() && existing == null) body += "\n\n## Images\n" + embeds.joinToString("\n")
+            val atts = prompts.flatMap { it.attachments }.distinctBy { it.uri }
+            if (s.wikiSaveImages) {
+                val embeds = atts.filter { it.type == "image" }.mapNotNull { assetFor(it) }.map { "![[$it]]" }
+                if (embeds.isNotEmpty()) body = com.miniichat.wiki.WikiMerge.addToSection(body, "Images", embeds, listOf("Bilder", "Fotos", "Photos"))
             }
-            if (prompt != null && s.wikiSaveTranscript) {
-                val tr = prompt.attachments.mapNotNull { it.transcript }.filter { it.isNotBlank() }
-                if (tr.isNotEmpty() && existing == null) {
-                    body += "\n\n> [!quote]- Transcript\n" + tr.joinToString("\n>\n") { t -> t.lines().joinToString("\n") { "> $it" } }
+            if (s.wikiSaveAudio) {
+                val embeds = atts.filter { it.type == "audio" }.mapNotNull { assetFor(it) }.map { "![[$it]]" }
+                if (embeds.isNotEmpty()) body = com.miniichat.wiki.WikiMerge.addToSection(body, "Recordings", embeds, listOf("Aufnahmen", "Audio"))
+            }
+            if (s.wikiSaveTranscript) {
+                val tr = atts.filter { !it.transcript.isNullOrBlank() && !body.contains(it.transcript!!.take(60)) }
+                for (a in tr) {
+                    body = body.trimEnd() + "\n\n> [!quote]- Transcript ${a.name}\n" +
+                        a.transcript!!.lines().joinToString("\n") { "> $it" } + "\n"
                 }
             }
 
             var note = parsed.copy(
                 id = existing?.id ?: parsed.id,
-                title = if (existing != null) wikiStore.uniqueTitle(parsed.title, existing.id) else wikiStore.uniqueTitle(parsed.title),
-                folder = parsed.folder.ifBlank { existing?.folder ?: s.wikiDefaultFolder },
+                // an updated page keeps its title (stable [[links]]); new pages get a unique one
+                title = when {
+                    target != null -> target.title
+                    existing != null -> wikiStore.uniqueTitle(parsed.title, existing.id)
+                    else -> wikiStore.uniqueTitle(parsed.title)
+                },
+                folder = if (target != null) target.folder else parsed.folder.ifBlank { existing?.folder ?: s.wikiDefaultFolder },
+                tags = ((existing?.tags ?: emptyList()) + parsed.tags).distinct(),
+                aliases = ((existing?.aliases ?: emptyList()) + parsed.aliases).distinct(),
                 created = existing?.created ?: System.currentTimeMillis(),
-                source = source,
+                source = existing?.source?.takeIf { target != null } ?: source,
                 body = body
             )
             if (s.wikiAutoLinkOnSave) {
                 val (linked, _) = WikiIndex(wikiStore.notes.value.filter { it.id != note.id } + note).autoLink(note.body, note.id)
                 note = note.copy(body = linked)
             }
-            // back-link to the originating chat (in-app link; stripped on export)
-            if (!note.body.contains("miniichat://chat/$convId")) {
-                val date = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(conv.createdAt))
-                val chatTitle = conv.title.ifBlank { "Chat" }.replace("[", "(").replace("]", ")")
-                note = note.copy(body = note.body.trimEnd() + "\n\n> [!info]- Source\n> Chat: [$chatTitle](miniichat://chat/$convId) · $date\n")
-            }
+            // back-link to every contributing chat (in-app link; stripped on export)
+            val date = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(conv.createdAt))
+            val chatTitle = conv.title.ifBlank { "Chat" }.replace("[", "(").replace("]", ")")
+            note = note.copy(body = com.miniichat.wiki.WikiMerge.addSource(note.body, "Chat: [$chatTitle](miniichat://chat/$convId) · $date"))
+
             val saved = wikiStore.save(note)
-            store.update(convId) { it.copy(wikiNoteId = saved.id, archived = it.archived || archive) }
+            // from now on this chat continues the same page
+            store.update(convId) { it.copy(wikiNoteId = saved.id, updatesNoteId = saved.id, archived = it.archived || archive) }
             if (archive && _activeId.value == convId) _activeId.value = null
             _toast.value = (if (existing != null) "Updated wiki note: " else "Saved to wiki: ") + saved.title +
                 if (archive) " · chat archived" else ""
             _openNote.value = saved.id
+        }
+    }
+
+    /** Start a chat that adds recordings/photos/notes to an existing page. */
+    fun continueNoteInChat(noteId: String) {
+        val note = wikiStore.get(noteId) ?: return
+        viewModelScope.launch {
+            val id = newId()
+            store.upsert(Conversation(id = id, title = "↻ ${note.title}", updatesNoteId = note.id, wikiNoteId = note.id))
+            _activeId.value = id
         }
     }
 
@@ -744,9 +834,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             assistant = assistant?.name ?: ""
         )
 
-        val systemWithWiki = if (current.wikiContextInChat)
+        val updatingNote = conversations.value.firstOrNull { it.id == _activeId.value }?.updatesNoteId
+            ?.let { wikiStore.get(it) }
+        val systemWithWiki = (if (current.wikiContextInChat)
             systemPrompt + WikiLinker.chatContext(wikiIndex.value, wikiFolders.value)
-        else systemPrompt
+        else systemPrompt) + (updatingNote?.let { com.miniichat.wiki.WikiMerge.updatePrompt(it) } ?: "")
 
         viewModelScope.launch {
             val activeId = _activeId.value ?: newId().also { _activeId.value = it }
@@ -765,7 +857,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val updated = (existing ?: Conversation(id = activeId, title = baseTitle, messages = emptyList()))
                 .let { conv ->
                     conv.copy(
-                        title = if (conv.messages.isEmpty()) baseTitle else conv.title,
+                        title = if (conv.messages.isEmpty() && conv.updatesNoteId == null) baseTitle else conv.title,
                         messages = conv.messages + userMsg + assistantPlaceholder,
                         updatedAt = System.currentTimeMillis()
                     )

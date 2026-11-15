@@ -3,6 +3,8 @@
 #include <string>
 #include <atomic>
 #include <cstring>
+#include <cstdio>
+#include <mutex>
 #include "whisper.h"
 #include "ggml-backend.h"
 
@@ -17,6 +19,20 @@
 #endif
 
 namespace {
+
+// ── engine log: every whisper/ggml log line is appended + flushed, so it survives a native crash ──
+std::mutex g_log_mutex;
+FILE *g_log_file = nullptr;
+
+void engineLog(enum ggml_log_level level, const char *text, void *) {
+    if (!text) return;
+#ifdef __ANDROID__
+    __android_log_print(level >= GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR :
+                        level == GGML_LOG_LEVEL_WARN ? ANDROID_LOG_WARN : ANDROID_LOG_INFO, "whisper", "%s", text);
+#endif
+    std::lock_guard<std::mutex> lock(g_log_mutex);
+    if (g_log_file) { fputs(text, g_log_file); fflush(g_log_file); }
+}
 
 struct CallbackCtx {
     JNIEnv *env;
@@ -79,14 +95,43 @@ bool encoderBeginCb(struct whisper_context *, struct whisper_state *, void *user
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_miniichat_whisper_WhisperLib_initContext(JNIEnv *env, jobject, jstring modelPath, jboolean useGpu) {
+Java_com_miniichat_whisper_WhisperLib_initContext(JNIEnv *env, jobject, jstring modelPath, jboolean useGpu, jboolean flashAttn) {
     const char *path = env->GetStringUTFChars(modelPath, nullptr);
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = useGpu == JNI_TRUE;
+    cparams.flash_attn = flashAttn == JNI_TRUE;
+    LOGI("init: model=%s use_gpu=%d flash_attn=%d", path, (int) cparams.use_gpu, (int) cparams.flash_attn);
+    {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        if (g_log_file) { fprintf(g_log_file, "[jni] init model=%s use_gpu=%d flash_attn=%d\n", path, (int) cparams.use_gpu, (int) cparams.flash_attn); fflush(g_log_file); }
+    }
     whisper_context *ctx = whisper_init_from_file_with_params(path, cparams);
     if (!ctx) LOGW("failed to load model %s", path);
     env->ReleaseStringUTFChars(modelPath, path);
     return reinterpret_cast<jlong>(ctx);
+}
+
+JNIEXPORT void JNICALL
+Java_com_miniichat_whisper_WhisperLib_setLogFile(JNIEnv *env, jobject, jstring path) {
+    std::lock_guard<std::mutex> lock(g_log_mutex);
+    if (g_log_file) { fclose(g_log_file); g_log_file = nullptr; }
+    if (path) {
+        const char *p = env->GetStringUTFChars(path, nullptr);
+        g_log_file = fopen(p, "a");
+        env->ReleaseStringUTFChars(path, p);
+    }
+    whisper_log_set(engineLog, nullptr);
+    ggml_log_set(engineLog, nullptr);
+}
+
+JNIEXPORT void JNICALL
+Java_com_miniichat_whisper_WhisperLib_logLine(JNIEnv *env, jobject, jstring line) {
+    const char *p = env->GetStringUTFChars(line, nullptr);
+    {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        if (g_log_file) { fputs(p, g_log_file); fputc('\n', g_log_file); fflush(g_log_file); }
+    }
+    env->ReleaseStringUTFChars(line, p);
 }
 
 JNIEXPORT void JNICALL

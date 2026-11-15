@@ -212,4 +212,12 @@
     <string name="speech_gpu_none">GPU build loaded, but no OpenCL GPU was found — running on CPU.</string>
     <string name="speech_gpu_crashed">The GPU crashed during the last transcription and was switched off automatically.</string>
     <string name="speech_last_run">Last run: %1$s</string>
+    <!-- drafts / multi-recording / gpu diagnostics -->
+    <string name="wiki_continue_chat">Add recordings / update in chat</string>
+    <string name="wiki_set_audio">Save recordings in notes (playable)</string>
+    <string name="speech_share_crash_log">Share crash log</string>
+    <string name="speech_clear">Clear</string>
+    <string name="speech_share_log">Share engine log</string>
+    <string name="speech_gpu_fa">Flash attention on GPU</string>
+    <string name="speech_gpu_fa_hint">Faster, but a common cause of GPU driver crashes. Off by default.</string>
 </resources>

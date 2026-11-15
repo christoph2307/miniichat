@@ -33,7 +33,9 @@ class Transcriber {
         if (!modelFile.exists()) throw IllegalStateException("Model not found: ${modelFile.name}")
         val gpu = WhisperLib.gpuBuildLoaded
         val ptr = withContext(Dispatchers.IO) {
-            WhisperLib.guardGpu(gpu) { WhisperLib.initContext(modelFile.absolutePath, gpu) }
+            // flash attention: always on CPU (fast, stable); on GPU only if the user opted in
+            val fa = if (gpu) WhisperLib.gpuFlashAttention else true
+            WhisperLib.guardGpu(gpu) { WhisperLib.initContext(modelFile.absolutePath, gpu, fa) }
         }
         if (ptr == 0L) throw IllegalStateException("Failed to load model ${modelFile.name} (corrupt file?)")
         ctxPtr = ptr

@@ -37,7 +37,8 @@ data class AppSettings(
     val wikiAutoLinkOnSave: Boolean = true,   // local [[link]] insertion for mentioned note titles
     val wikiDefaultFolder: String = "Inbox",
     val wikiSaveImages: Boolean = true,       // copy photos of the prompt into the note
-    val wikiSaveTranscript: Boolean = false   // keep the raw transcript as a collapsed callout
+    val wikiSaveTranscript: Boolean = false,  // keep the raw transcript as a collapsed callout
+    val wikiSaveAudio: Boolean = true         // copy recordings into the note (## Recordings, playable)
 )
 
 class SettingsRepository(private val context: Context) {
@@ -63,6 +64,7 @@ class SettingsRepository(private val context: Context) {
         val WIKI_FOLDER = stringPreferencesKey("wiki_default_folder")
         val WIKI_IMAGES = booleanPreferencesKey("wiki_save_images")
         val WIKI_TRANSCRIPT = booleanPreferencesKey("wiki_save_transcript")
+        val WIKI_AUDIO = booleanPreferencesKey("wiki_save_audio")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p -> read(p) }
@@ -88,7 +90,8 @@ class SettingsRepository(private val context: Context) {
         wikiAutoLinkOnSave = p[Keys.WIKI_AUTOLINK] ?: true,
         wikiDefaultFolder = p[Keys.WIKI_FOLDER] ?: "Inbox",
         wikiSaveImages = p[Keys.WIKI_IMAGES] ?: true,
-        wikiSaveTranscript = p[Keys.WIKI_TRANSCRIPT] ?: false
+        wikiSaveTranscript = p[Keys.WIKI_TRANSCRIPT] ?: false,
+        wikiSaveAudio = p[Keys.WIKI_AUDIO] ?: true
     )
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
@@ -115,6 +118,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.WIKI_FOLDER] = next.wikiDefaultFolder
             p[Keys.WIKI_IMAGES] = next.wikiSaveImages
             p[Keys.WIKI_TRANSCRIPT] = next.wikiSaveTranscript
+            p[Keys.WIKI_AUDIO] = next.wikiSaveAudio
         }
     }
 }

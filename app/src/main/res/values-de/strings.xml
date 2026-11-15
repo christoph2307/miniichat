@@ -116,4 +116,12 @@
     <string name="speech_gpu_none">GPU-Build geladen, aber keine OpenCL-GPU gefunden — läuft auf der CPU.</string>
     <string name="speech_gpu_crashed">Die GPU ist bei der letzten Transkription abgestürzt und wurde automatisch deaktiviert.</string>
     <string name="speech_last_run">Letzter Lauf: %1$s</string>
+    <!-- drafts / multi-recording / gpu diagnostics -->
+    <string name="wiki_continue_chat">Aufnahmen hinzufügen / im Chat ergänzen</string>
+    <string name="wiki_set_audio">Aufnahmen in Notizen speichern (abspielbar)</string>
+    <string name="speech_share_crash_log">Absturzprotokoll teilen</string>
+    <string name="speech_clear">Löschen</string>
+    <string name="speech_share_log">Engine-Protokoll teilen</string>
+    <string name="speech_gpu_fa">Flash Attention auf der GPU</string>
+    <string name="speech_gpu_fa_hint">Schneller, aber häufige Ursache für GPU-Treiberabstürze. Standardmäßig aus.</string>
 </resources>

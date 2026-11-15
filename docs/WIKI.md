@@ -20,6 +20,17 @@
    - saving the same reply again updates the same note (tracked via `source:`)
 4. In the note: backlinks, unlinked mentions, missing links, and the **AI links** button.
 
+## One page, many recordings
+
+- Several recordings can go into one message: each recording is queued, transcribed in turn,
+  and inserted as `🎙 Recording N (m:ss): …`. On saving, all recordings are copied to the note
+  under **## Recordings** (playable in the app, exported as attachments).
+- **Add recordings / update in chat** (on any note) starts a chat bound to that page. Every
+  request includes the current page, and the model returns the complete updated page. **Accept**
+  updates the same note. `WikiMerge.mergeUpdate` guarantees that images, recordings and the
+  **Sources** callout (one entry per contributing chat) survive even if the model drops them.
+  The title stays the same, so `[[links]]` keep working.
+
 ## Decision: local index + LLM librarian (hybrid)
 
 | | Local index only | LLM decides everything | **Hybrid (chosen)** |

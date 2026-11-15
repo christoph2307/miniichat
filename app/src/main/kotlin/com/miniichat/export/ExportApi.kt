@@ -285,6 +285,7 @@ object ExportPreparer {
                     val path = resolvePath(l.target, l.embed)
                     when {
                         path == null -> if (l.embed) "" else text
+                        l.embed && !com.miniichat.wiki.WikiMerge.isImage(l.target) -> "[📎 ${l.alias ?: l.target}](${encodePath(path)})"
                         l.embed -> "![${l.alias ?: l.target}](${encodePath(path)})"
                         else -> "[$text](${encodePath(path)}${l.heading?.let { "#" + slug(it) } ?: ""})"
                     }

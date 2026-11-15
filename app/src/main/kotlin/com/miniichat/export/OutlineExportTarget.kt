@@ -217,7 +217,11 @@ class OutlineExportTarget(
                 val url = if (f != null && f.exists()) runCatching {
                     uploadAsset(config, state, f, ExportPreparer.mimeOf(f.name), docId)
                 }.getOrNull() else null
-                if (url != null) "![${l.alias ?: ""}]($url)" else "*(missing: ${l.target})*"
+                when {
+                    url == null -> "*(missing: ${l.target})*"
+                    com.miniichat.wiki.WikiMerge.isImage(l.target) -> "![${l.alias ?: ""}]($url)"
+                    else -> "[📎 ${l.alias ?: l.target}]($url)"  // recordings & other files as attachment links
+                }
             } else {
                 val label = l.alias ?: (if (l.heading != null) "${l.target} › ${l.heading}" else l.target)
                 val noteId = bundle.resolveNoteId(l.target)

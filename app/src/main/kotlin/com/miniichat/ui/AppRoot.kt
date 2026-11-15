@@ -99,8 +99,7 @@ fun AppRoot(vm: ChatViewModel) {
     val toast by vm.toast.collectAsState()
     val fetchingId by vm.fetchingModelsFor.collectAsState()
     val transcription by vm.transcription.collectAsState()
-    val pendingTranscript by vm.pendingTranscript.collectAsState()
-    val attachmentUpdate by vm.attachmentUpdates.collectAsState()
+    val draft by vm.draft.collectAsState()
     val installedModels by vm.modelManager.installed.collectAsState()
     val hasSpeechModel = settings.whisperModel.isNotBlank() && settings.whisperModel in installedModels
     val wikiIndex by vm.wikiIndex.collectAsState()
@@ -202,13 +201,14 @@ fun AppRoot(vm: ChatViewModel) {
                             } else showModelPicker = true
                         },
                         transcription = transcription,
-                        pendingTranscript = pendingTranscript,
-                        onConsumeTranscript = { vm.consumePendingTranscript() },
-                        attachmentUpdate = attachmentUpdate,
-                        onConsumeAttachmentUpdate = { vm.consumeAttachmentUpdate() },
+                        draft = draft,
+                        draftKey = vm.draftKey(activeId),
+                        onDraftTextChange = { vm.setDraftText(it) },
+                        onDraftAttachmentsChange = { vm.setDraftAttachments(it) },
+                        onSendDraft = { vm.sendDraft() },
                         hasSpeechModel = hasSpeechModel,
-                        onRecordingFinished = { rec, tr, add -> vm.onRecordingFinished(rec, tr, add) },
-                        onImportAudio = { uri, add -> vm.importAudio(uri, add) },
+                        onRecordingFinished = { rec, tr -> vm.onRecordingFinished(rec, tr) },
+                        onImportAudio = { uri -> vm.importAudio(uri) },
                         onTranscribe = { vm.transcribe(it) },
                         onCancelTranscription = { vm.cancelTranscription() },
                         onSaveToWiki = { vm.saveMessageToWiki(it) },
@@ -283,7 +283,8 @@ fun AppRoot(vm: ChatViewModel) {
                         onApplyAi = { acc, tg, fo, al, st -> vm.applyAiLinks(acc, tg, fo, al, st) },
                         onDelete = { vm.deleteNote(note.id); closeNote() },
                         onExport = { exportPreselect = listOf(note.id); exportReturn = Screen.Note; screen = Screen.Export },
-                        onAppLink = { openAppLink(it) }
+                        onAppLink = { openAppLink(it) },
+                        onContinueInChat = { vm.continueNoteInChat(note.id); screen = Screen.Chat }
                     )
                 }
             }

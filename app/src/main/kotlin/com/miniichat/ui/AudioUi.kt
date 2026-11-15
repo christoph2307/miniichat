@@ -203,7 +203,7 @@ fun TranscriptionBanner(state: TranscriptionUi, onCancel: () -> Unit) {
                 "decoding" -> stringResource(R.string.decoding_audio)
                 "loading" -> stringResource(R.string.loading_model)
                 else -> stringResource(R.string.transcribing_pct, (state.progress * 100).toInt())
-            }
+            } + if (state.queued > 0) "  (+${state.queued})" else ""
             Text(label, style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.weight(1f))
             Text(
@@ -267,13 +267,16 @@ fun RecorderSheet(
         while (history.size > 60) history.removeAt(0)
     }
 
+    val latestOnFinished by androidx.compose.runtime.rememberUpdatedState(onFinished)
+    val latestOnDismiss by androidx.compose.runtime.rememberUpdatedState(onDismiss)
     fun finish(transcribe: Boolean) {
+        // Not tied to this composable's scope: the sheet may leave composition as soon as the
+        // recorder goes idle, and the recording must still reach the ViewModel.
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
         DictaphoneRecorder.stop { rec ->
-            scope.launch {
-                withContext(Dispatchers.Main) {
-                    if (rec != null) onFinished(rec, transcribe)
-                    onDismiss()
-                }
+            main.post {
+                if (rec != null) latestOnFinished(rec, transcribe)
+                latestOnDismiss()
             }
         }
     }

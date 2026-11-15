@@ -97,13 +97,14 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     onPickModel: () -> Unit,
     transcription: com.miniichat.TranscriptionUi? = null,
-    pendingTranscript: Pair<String, String>? = null,
-    onConsumeTranscript: () -> Unit = {},
-    attachmentUpdate: com.miniichat.data.Attachment? = null,
-    onConsumeAttachmentUpdate: () -> Unit = {},
+    draft: com.miniichat.data.Draft = com.miniichat.data.Draft(),
+    draftKey: String = "",
+    onDraftTextChange: (String) -> Unit = {},
+    onDraftAttachmentsChange: (List<com.miniichat.data.Attachment>) -> Unit = {},
+    onSendDraft: () -> Unit = {},
     hasSpeechModel: Boolean = false,
-    onRecordingFinished: (com.miniichat.audio.FinishedRecording, Boolean, (com.miniichat.data.Attachment) -> Unit) -> Unit = { _, _, _ -> },
-    onImportAudio: (android.net.Uri, (com.miniichat.data.Attachment) -> Unit) -> Unit = { _, _ -> },
+    onRecordingFinished: (com.miniichat.audio.FinishedRecording, Boolean) -> Unit = { _, _ -> },
+    onImportAudio: (android.net.Uri) -> Unit = {},
     onTranscribe: (com.miniichat.data.Attachment) -> Unit = {},
     onCancelTranscription: () -> Unit = {},
     onSaveToWiki: (String) -> Unit = {},
@@ -114,22 +115,13 @@ fun ChatScreen(
     savedMessageIds: Set<String> = emptySet(),
     onOpenSavedNote: (String) -> Unit = {}
 ) {
-    var input by rememberSaveable { mutableStateOf("") }
+    // Text lives in the ViewModel draft (persisted); a local mirror keeps typing smooth.
+    var input by remember(draftKey) { mutableStateOf(draft.text) }
+    LaunchedEffect(draft.text) { if (draft.text != input) input = draft.text }
     var feedbackFor by remember { mutableStateOf<String?>(null) }
-    var pendingAttachments by remember { mutableStateOf<List<com.miniichat.data.Attachment>>(emptyList()) }
     val playback = rememberAudioPlayback()
 
     // Merge finished local transcripts into the draft so they can be edited before sending.
-    LaunchedEffect(pendingTranscript) {
-        val t = pendingTranscript ?: return@LaunchedEffect
-        input = if (input.isBlank()) t.second else input.trimEnd() + "\n\n" + t.second
-        onConsumeTranscript()
-    }
-    LaunchedEffect(attachmentUpdate) {
-        val u = attachmentUpdate ?: return@LaunchedEffect
-        pendingAttachments = pendingAttachments.map { if (it.uri == u.uri) u else it }
-        onConsumeAttachmentUpdate()
-    }
     val listState = rememberLazyListState()
     val rawMessages = conversation?.messages ?: emptyList()
     // Apply in-memory streaming overlay so the assistant message updates per-token
@@ -242,15 +234,12 @@ fun ChatScreen(
 
         InputBar(
             value = input,
-            onValueChange = { input = it },
-            attachments = pendingAttachments,
-            onAttachmentsChange = { pendingAttachments = it },
+            onValueChange = { input = it; onDraftTextChange(it) },
+            attachments = draft.attachments,
+            onAttachmentsChange = onDraftAttachmentsChange,
             onSend = {
-                val text = input
-                val atts = pendingAttachments
                 input = ""
-                pendingAttachments = emptyList()
-                onSend(text, atts)
+                onSendDraft()
             },
             onStop = onStop,
             isStreaming = isStreaming,
@@ -258,12 +247,8 @@ fun ChatScreen(
             playback = playback,
             autoTranscribe = settings.autoTranscribe,
             hasSpeechModel = hasSpeechModel,
-            onRecordingFinished = { rec, tr ->
-                onRecordingFinished(rec, tr) { att -> pendingAttachments = pendingAttachments + att }
-            },
-            onImportAudio = { uri ->
-                onImportAudio(uri) { att -> pendingAttachments = pendingAttachments + att }
-            },
+            onRecordingFinished = onRecordingFinished,
+            onImportAudio = onImportAudio,
             onTranscribe = onTranscribe
         )
     }

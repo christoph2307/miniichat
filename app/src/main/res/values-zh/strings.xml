@@ -212,4 +212,12 @@
     <string name="speech_gpu_none">已加载 GPU 构建，但未找到 OpenCL GPU — 使用 CPU 运行。</string>
     <string name="speech_gpu_crashed">上次转写时 GPU 崩溃，已自动关闭。</string>
     <string name="speech_last_run">上次运行：%1$s</string>
+    <!-- drafts / multi-recording / gpu diagnostics -->
+    <string name="wiki_continue_chat">添加录音 / 在聊天中更新</string>
+    <string name="wiki_set_audio">在笔记中保存录音（可播放）</string>
+    <string name="speech_share_crash_log">分享崩溃日志</string>
+    <string name="speech_clear">清除</string>
+    <string name="speech_share_log">分享引擎日志</string>
+    <string name="speech_gpu_fa">GPU 上的 Flash Attention</string>
+    <string name="speech_gpu_fa_hint">更快，但常导致 GPU 驱动崩溃。默认关闭。</string>
 </resources>

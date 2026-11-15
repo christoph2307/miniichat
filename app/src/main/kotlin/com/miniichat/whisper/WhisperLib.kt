@@ -26,6 +26,11 @@ object WhisperLib {
     private const val KEY_GPU_PENDING = "gpu_pending"
 
     @Volatile private var prefs: SharedPreferences? = null
+    private var logFile: File? = null
+
+    /** Engine log of the run that crashed (kept until the next crash), or null. */
+    var crashLogFile: File? = null
+        private set
 
     /** true if the previous GPU run crashed and GPU was switched off automatically. */
     var gpuCrashRecovered: Boolean = false
@@ -34,14 +39,46 @@ object WhisperLib {
     /** Must be called (with the application context) before the library is first used. */
     fun configure(context: Context) {
         if (prefs != null) return
-        val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val app = context.applicationContext
+        val p = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs = p
+        val dir = File(app.filesDir, "engine").apply { mkdirs() }
+        val log = File(dir, "engine.log")
+        val crash = File(dir, "engine-crash.log")
         if (p.getBoolean(KEY_GPU_PENDING, false)) {
             // the process died while the GPU backend was initialising/running → disable it
             p.edit().putBoolean(KEY_GPU, false).putBoolean(KEY_GPU_PENDING, false).commit()
             gpuCrashRecovered = true
+            runCatching {
+                crash.writeText("=== engine log of the crashed run ===\n" + (if (log.exists()) log.readText().takeLast(200_000) else "(empty)") +
+                    "\n\n=== system exit info ===\n" + exitInfo(app))
+            }
         }
+        if (crash.exists()) crashLogFile = crash
+        // keep the log small: start fresh each process, previous run kept as .prev
+        runCatching { if (log.exists()) { File(dir, "engine.prev.log").delete(); log.renameTo(File(dir, "engine.prev.log")) } }
+        logFile = log
     }
+
+    private fun exitInfo(context: Context): String {
+        if (android.os.Build.VERSION.SDK_INT < 30) return "(needs Android 11+)"
+        return runCatching {
+            val am = context.getSystemService(android.app.ActivityManager::class.java)
+            am.getHistoricalProcessExitReasons(context.packageName, 0, 3).joinToString("\n") { e ->
+                "${java.time.Instant.ofEpochMilli(e.timestamp)} reason=${e.reason} status=${e.status} ${e.description ?: ""}"
+            }.ifBlank { "(none)" }
+        }.getOrElse { "(unavailable: ${it.message})" }
+    }
+
+    fun clearCrashLog() { crashLogFile?.delete(); crashLogFile = null; gpuCrashRecovered = false }
+
+    /** Current engine log (this process). */
+    fun currentLog(): String = runCatching { logFile?.readText()?.takeLast(100_000) }.getOrNull().orEmpty()
+
+    /** Flash attention on the GPU (off by default — a frequent cause of OpenCL crashes). */
+    var gpuFlashAttention: Boolean
+        get() = prefs?.getBoolean("gpu_fa", false) == true
+        set(v) { prefs?.edit()?.putBoolean("gpu_fa", v)?.commit() }
 
     var gpuRequested: Boolean
         get() = prefs?.getBoolean(KEY_GPU, false) == true
@@ -65,16 +102,34 @@ object WhisperLib {
         if (v82 && gpuRequested && tryLoad("whisper_jni_gpu")) {
             variant = "GPU (OpenCL) + armv8.2"
             gpuBuildLoaded = true
+            startLog()
+            // first touch of the OpenCL driver (device probing, kernel setup) happens here → guarded
+            cachedDevices = runCatching { guardGpu(true) { parseDevices() } }.getOrDefault(emptyList())
             return null
         }
         if (v82 && tryLoad("whisper_jni_v82")) {
             variant = "armv8.2 dotprod+fp16"
+            startLog()
             return null
         }
         return runCatching { System.loadLibrary("whisper_jni") }
-            .onSuccess { variant = "baseline" }
+            .onSuccess { variant = "baseline"; startLog() }
             .exceptionOrNull()
     }
+
+    private fun startLog() {
+        runCatching {
+            setLogFile(logFile?.absolutePath)
+            logLine("[app] ${java.time.Instant.now()} variant=$variant device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
+        }
+    }
+
+    private var cachedDevices: List<Triple<String, String, String>>? = null
+
+    private fun parseDevices(): List<Triple<String, String, String>> =
+        listDevices().lines().filter { it.isNotBlank() }.map {
+            val p = it.split('\t'); Triple(p.getOrElse(0) { "" }, p.getOrElse(1) { "" }, p.getOrElse(2) { "" })
+        }
 
     /** ARMv8.2 features the optimised builds need: FP16 arithmetic (fphp+asimdhp) and dot product (asimddp). */
     fun cpuSupportsV82(): Boolean = runCatching {
@@ -86,12 +141,11 @@ object WhisperLib {
     }.getOrDefault(false)
 
     /** Compute devices as (type, name, description); empty if the library isn't loaded. */
-    fun devices(): List<Triple<String, String, String>> =
-        if (!isAvailable) emptyList() else runCatching {
-            listDevices().lines().filter { it.isNotBlank() }.map {
-                val p = it.split('\t'); Triple(p.getOrElse(0) { "" }, p.getOrElse(1) { "" }, p.getOrElse(2) { "" })
-            }
-        }.getOrDefault(emptyList())
+    fun devices(): List<Triple<String, String, String>> {
+        if (!isAvailable) return emptyList()
+        cachedDevices?.let { return it }
+        return runCatching { guardGpu(gpuBuildLoaded) { parseDevices() } }.getOrDefault(emptyList()).also { cachedDevices = it }
+    }
 
     fun hasGpuDevice(): Boolean = gpuBuildLoaded && devices().any { it.first == "GPU" || it.first == "IGPU" }
 
@@ -108,7 +162,9 @@ object WhisperLib {
         get() = prefs?.getString("last_run", null)
         set(v) { prefs?.edit()?.putString("last_run", v)?.apply() }
 
-    external fun initContext(modelPath: String, useGpu: Boolean): Long
+    external fun initContext(modelPath: String, useGpu: Boolean, flashAttn: Boolean): Long
+    external fun setLogFile(path: String?)
+    external fun logLine(line: String)
     external fun freeContext(ptr: Long)
     external fun requestAbort()
     external fun transcribe(

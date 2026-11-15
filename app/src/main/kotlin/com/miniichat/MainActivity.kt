@@ -38,6 +38,11 @@ class MainActivity : ComponentActivity() {
         return base.createConfigurationContext(cfg)
     }
 
+    override fun onStop() {
+        vm.flushDrafts() // standby / app switch: make sure the unsent draft is on disk
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

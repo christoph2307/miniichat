@@ -292,9 +292,34 @@ fun SpeechSettingsScreen(
                     val v82 = remember { WhisperLib.cpuSupportsV82() }
                     var gpuWanted by remember { mutableStateOf(WhisperLib.gpuRequested) }
                     val devices = remember { WhisperLib.devices() }
-                    if (WhisperLib.gpuCrashRecovered) {
+                    var crashLog by remember { mutableStateOf(WhisperLib.crashLogFile) }
+                    fun share(subject: String, text: String) {
+                        ctx.startActivity(android.content.Intent.createChooser(
+                            android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
+                                putExtra(android.content.Intent.EXTRA_TEXT, text.takeLast(90_000))
+                            }, null))
+                    }
+                    if (WhisperLib.gpuCrashRecovered || crashLog != null) {
                         Text(stringResource(R.string.speech_gpu_crashed), color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium)
+                        crashLog?.let { f ->
+                            val tail = remember(f) { runCatching { f.readText() }.getOrDefault("") }
+                            Text(
+                                tail.lines().filter { it.isNotBlank() }.takeLast(8).joinToString("\n"),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row {
+                                TextButton(onClick = { share("MiniiChat Lab GPU crash log", tail) }) {
+                                    Text(stringResource(R.string.speech_share_crash_log))
+                                }
+                                TextButton(onClick = { WhisperLib.clearCrashLog(); crashLog = null }) {
+                                    Text(stringResource(R.string.speech_clear))
+                                }
+                            }
+                        }
                         Spacer(Modifier.height(8.dp))
                     }
                     Text(stringResource(R.string.speech_engine_active, WhisperLib.variant),
@@ -312,6 +337,14 @@ fun SpeechSettingsScreen(
                         subtitle = if (v82) stringResource(R.string.speech_gpu_hint) else stringResource(R.string.speech_gpu_unsupported),
                         checked = gpuWanted
                     ) { v -> if (v82) { gpuWanted = v; WhisperLib.gpuRequested = v } }
+                    if (gpuWanted) {
+                        var fa by remember { mutableStateOf(WhisperLib.gpuFlashAttention) }
+                        ToggleRow(
+                            title = stringResource(R.string.speech_gpu_fa),
+                            subtitle = stringResource(R.string.speech_gpu_fa_hint),
+                            checked = fa
+                        ) { v -> fa = v; WhisperLib.gpuFlashAttention = v }
+                    }
                     if (gpuWanted != WhisperLib.gpuBuildLoaded && v82) {
                         TextButton(onClick = {
                             val i = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
@@ -324,6 +357,9 @@ fun SpeechSettingsScreen(
                         Spacer(Modifier.height(8.dp))
                         Text(stringResource(R.string.speech_last_run, it), style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { share("MiniiChat Lab engine log", WhisperLib.currentLog()) }) {
+                        Text(stringResource(R.string.speech_share_log))
                     }
                 }
             }
