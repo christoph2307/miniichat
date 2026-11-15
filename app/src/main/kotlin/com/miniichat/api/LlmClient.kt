@@ -172,6 +172,18 @@ class LlmClient {
         return ids.distinct().sorted()
     }
 
+    /** Single non-streaming completion (used by the wiki librarian). */
+    suspend fun complete(
+        provider: ProviderConfig,
+        settings: AppSettings,
+        modelId: String,
+        messages: List<ChatMessage>
+    ): String {
+        val sb = StringBuilder()
+        chatStream(provider, settings.copy(stream = false), modelId, messages).collect { sb.append(it) }
+        return sb.toString()
+    }
+
     fun chatStream(
         provider: ProviderConfig,
         settings: AppSettings,

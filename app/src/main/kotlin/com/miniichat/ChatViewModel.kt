@@ -35,6 +35,30 @@ import com.miniichat.whisper.TranscribeOptions
 import com.miniichat.whisper.Transcriber
 import com.miniichat.whisper.WhisperModelManager
 import java.io.File
+import com.miniichat.wiki.WikiIndex
+import com.miniichat.wiki.WikiLinker
+import com.miniichat.wiki.WikiNote
+import com.miniichat.wiki.WikiStore
+import com.miniichat.wiki.Frontmatter
+import com.miniichat.export.ExportBundle
+import com.miniichat.export.ExportConfigStore
+import com.miniichat.export.ExportOptions
+import com.miniichat.export.ExportPreparer
+import com.miniichat.export.ExportProgress
+import com.miniichat.export.ExportRegistry
+import com.miniichat.export.ExportResult
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+
+/** State of the "AI links" librarian dialog. */
+data class AiLinkState(
+    val noteId: String,
+    val loading: Boolean = true,
+    val result: WikiLinker.Result? = null,
+    val error: String? = null
+)
+
+data class ExportRun(val targetName: String, val done: Int = 0, val total: Int = 0, val current: String = "", val result: ExportResult? = null)
 
 /** UI state of an in-flight local transcription. */
 data class TranscriptionUi(
@@ -244,6 +268,235 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ─────────────────────────────── Wiki ───────────────────────────────
+
+    val wikiStore = WikiStore(File(app.filesDir, "wiki"))
+    val wikiNotes: StateFlow<List<WikiNote>> = wikiStore.notes
+    val wikiFolders: StateFlow<Set<String>> = wikiStore.folders
+    val wikiIndex: StateFlow<WikiIndex> = wikiStore.notes.map { WikiIndex(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, WikiIndex(emptyList()))
+
+    /** One-shot navigation request (note id) consumed by AppRoot. */
+    private val _openNote = MutableStateFlow<String?>(null)
+    val openNote: StateFlow<String?> = _openNote.asStateFlow()
+    fun consumeOpenNote() { _openNote.value = null }
+    fun requestOpenNote(id: String) { _openNote.value = id }
+
+    private val _aiLink = MutableStateFlow<AiLinkState?>(null)
+    val aiLink: StateFlow<AiLinkState?> = _aiLink.asStateFlow()
+    private var aiLinkJob: Job? = null
+
+    val exportConfig = ExportConfigStore(app)
+    private val _exportRun = MutableStateFlow<ExportRun?>(null)
+    val exportRun: StateFlow<ExportRun?> = _exportRun.asStateFlow()
+    fun clearExportRun() { _exportRun.value = null }
+
+    init {
+        viewModelScope.launch { wikiStore.load() }
+    }
+
+    /** Unwrap a reply that the model put inside a single ```markdown fence. */
+    private fun unwrapFence(md: String): String {
+        val t = md.trim()
+        val m = Regex("^```(?:markdown|md)?\\s*\\n([\\s\\S]*?)\\n```\\s*$").matchEntire(t)
+        return m?.groupValues?.get(1) ?: md
+    }
+
+    /**
+     * Save an assistant reply as a wiki note:
+     * frontmatter/H1 → title/folder/tags, photos of the preceding prompt → assets + embeds,
+     * optional raw transcript, then local auto-linking. Saving the same message again updates the note.
+     */
+    fun saveMessageToWiki(messageId: String) {
+        viewModelScope.launch {
+            val convId = _activeId.value ?: return@launch
+            val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
+            val idx = conv.messages.indexOfFirst { it.id == messageId }
+            if (idx < 0) return@launch
+            val msg = conv.messages[idx]
+            val prompt = conv.messages.subList(0, idx).lastOrNull { it.role == "user" }
+            val s = settings.value
+            val source = "chat:$convId/$messageId"
+            val existing = wikiStore.findBySource(source)
+
+            val parsed = Frontmatter.toNote(unwrapFence(msg.content), existing?.id ?: WikiStore.newId(), conv.title.ifBlank { "Note" })
+            var body = parsed.body.trim()
+
+            if (prompt != null && s.wikiSaveImages) {
+                val embeds = mutableListOf<String>()
+                for (att in prompt.attachments.filter { it.type == "image" }) {
+                    val name = runCatching {
+                        getApplication<Application>().contentResolver.openInputStream(android.net.Uri.parse(att.uri))!!.use {
+                            wikiStore.addAsset(it, att.name)
+                        }
+                    }.getOrNull() ?: continue
+                    embeds.add("![[$name]]")
+                }
+                if (embeds.isNotEmpty() && existing == null) body += "\n\n## Images\n" + embeds.joinToString("\n")
+            }
+            if (prompt != null && s.wikiSaveTranscript) {
+                val tr = prompt.attachments.mapNotNull { it.transcript }.filter { it.isNotBlank() }
+                if (tr.isNotEmpty() && existing == null) {
+                    body += "\n\n> [!quote]- Transcript\n" + tr.joinToString("\n>\n") { t -> t.lines().joinToString("\n") { "> $it" } }
+                }
+            }
+
+            var note = parsed.copy(
+                id = existing?.id ?: parsed.id,
+                title = if (existing != null) wikiStore.uniqueTitle(parsed.title, existing.id) else wikiStore.uniqueTitle(parsed.title),
+                folder = parsed.folder.ifBlank { existing?.folder ?: s.wikiDefaultFolder },
+                created = existing?.created ?: System.currentTimeMillis(),
+                source = source,
+                body = body
+            )
+            if (s.wikiAutoLinkOnSave) {
+                val (linked, _) = WikiIndex(wikiStore.notes.value.filter { it.id != note.id } + note).autoLink(note.body, note.id)
+                note = note.copy(body = linked)
+            }
+            val saved = wikiStore.save(note)
+            _toast.value = (if (existing != null) "Updated wiki note: " else "Saved to wiki: ") + saved.title
+            _openNote.value = saved.id
+        }
+    }
+
+    fun saveNote(note: WikiNote, onSaved: (WikiNote) -> Unit = {}) {
+        viewModelScope.launch {
+            val old = wikiStore.get(note.id)
+            if (old != null && old.title != note.title) {
+                val n = wikiStore.rename(note.id, note.title)
+                if (n > 0) _toast.value = "Updated links in $n notes"
+                val renamed = wikiStore.get(note.id) ?: return@launch
+                onSaved(wikiStore.save(note.copy(title = renamed.title)))
+            } else onSaved(wikiStore.save(note))
+        }
+    }
+
+    fun createNote(title: String, folder: String, body: String = "", open: Boolean = true) {
+        viewModelScope.launch {
+            val n = wikiStore.create(title, folder, body.ifBlank { "# ${WikiNote.sanitizeTitle(title)}\n\n" })
+            if (open) _openNote.value = n.id
+        }
+    }
+
+    fun deleteNote(id: String) { viewModelScope.launch { wikiStore.delete(id) } }
+    fun moveNote(id: String, folder: String) { viewModelScope.launch { wikiStore.move(id, folder) } }
+    fun createFolder(path: String) { viewModelScope.launch { wikiStore.createFolder(path) } }
+    fun renameFolder(from: String, to: String) { viewModelScope.launch { wikiStore.renameFolder(from, to) } }
+    fun deleteFolder(path: String) { viewModelScope.launch { wikiStore.deleteFolder(path) } }
+
+    fun toggleTask(noteId: String, line: Int, checked: Boolean) {
+        viewModelScope.launch {
+            val n = wikiStore.get(noteId) ?: return@launch
+            val lines = n.body.split("\n").toMutableList()
+            if (line !in lines.indices) return@launch
+            lines[line] = lines[line].replaceFirst(Regex("\\[[ xX]]"), if (checked) "[x]" else "[ ]")
+            wikiStore.save(n.copy(body = lines.joinToString("\n")))
+        }
+    }
+
+    /** Local deterministic linking for one note. */
+    fun autoLinkNote(id: String) {
+        viewModelScope.launch {
+            val n = wikiStore.get(id) ?: return@launch
+            val (body, count) = wikiIndex.value.autoLink(n.body, id)
+            if (count > 0) wikiStore.save(n.copy(body = body))
+            _toast.value = if (count > 0) "Added $count links" else "No unlinked mentions found"
+        }
+    }
+
+    fun autoLinkAll() {
+        viewModelScope.launch {
+            var total = 0
+            for (n in wikiStore.notes.value) {
+                val (body, c) = WikiIndex(wikiStore.notes.value).autoLink(n.body, n.id)
+                if (c > 0) { wikiStore.save(n.copy(body = body), touch = false); total += c }
+            }
+            _toast.value = "Added $total links across the wiki"
+        }
+    }
+
+    /** Ask the configured LLM to propose links/tags/folder for a note (index-based). */
+    fun requestAiLinks(noteId: String) {
+        val note = wikiStore.get(noteId) ?: return
+        val target = resolveLlm() ?: return
+        aiLinkJob?.cancel()
+        _aiLink.value = AiLinkState(noteId)
+        aiLinkJob = viewModelScope.launch {
+            try {
+                val idx = wikiIndex.value
+                val reply = client.complete(
+                    target.first, settings.value.copy(temperature = 0.2f), target.second,
+                    listOf(
+                        ChatMessage("system", WikiLinker.SYSTEM_PROMPT),
+                        ChatMessage("user", WikiLinker.userPrompt(note, idx, wikiFolders.value))
+                    )
+                )
+                val result = WikiLinker.validate(WikiLinker.parse(reply), note, idx)
+                _aiLink.value = AiLinkState(noteId, loading = false, result = result)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _aiLink.value = AiLinkState(noteId, loading = false, error = e.message ?: "Request failed")
+            }
+        }
+    }
+
+    fun dismissAiLinks() { aiLinkJob?.cancel(); _aiLink.value = null }
+
+    fun applyAiLinks(accepted: Set<String>, tags: Boolean, folder: Boolean, aliases: Boolean, createStubs: Boolean) {
+        val st = _aiLink.value ?: return
+        val result = st.result ?: return
+        viewModelScope.launch {
+            val note = wikiStore.get(st.noteId) ?: return@launch
+            val (updated, newOnes) = WikiLinker.apply(note, result, accepted, tags, folder, aliases)
+            wikiStore.save(updated)
+            if (createStubs) for (t in newOnes) {
+                if (wikiIndex.value.resolve(t) == null) {
+                    wikiStore.create(t, updated.folder, "# $t\n\n> [!todo] Stub created from [[${updated.title}]]\n")
+                }
+            }
+            _aiLink.value = null
+            _toast.value = "Applied ${accepted.size} suggestions"
+        }
+    }
+
+    /** Provider + model for background LLM calls (same resolution as the chat). */
+    private fun resolveLlm(): Pair<ProviderConfig, String>? {
+        val assistant = activeAssistant()
+        val provider = assistant?.preferredProviderId?.let { id -> providers.value.firstOrNull { it.id == id } }
+            ?: activeProvider()
+        val model = assistant?.preferredModel?.takeIf { it.isNotBlank() } ?: settings.value.activeModel
+        if (provider == null || model.isBlank()) {
+            _error.value = "No provider/model configured. Open Settings → Providers."
+            return null
+        }
+        return provider to model
+    }
+
+    fun buildExportBundle(ids: List<String>, options: ExportOptions): ExportBundle {
+        val idx = wikiIndex.value
+        val notes = ids.mapNotNull { idx.byId[it] }
+        return ExportPreparer.prepare(notes, idx, options) { name -> wikiStore.assetFile(name).takeIf { it.exists() } }
+    }
+
+    fun exportToTarget(targetId: String, ids: List<String>, options: ExportOptions) {
+        val target = ExportRegistry.byId(targetId) ?: return
+        viewModelScope.launch {
+            val cfg = exportConfig.get(targetId)
+            val missing = target.missingRequired(cfg)
+            if (missing.isNotEmpty()) {
+                _error.value = "${target.name}: please configure ${missing.joinToString { it.label }} (Settings → Export targets)"
+                return@launch
+            }
+            _exportRun.value = ExportRun(target.name, 0, ids.size)
+            val bundle = withContext(Dispatchers.IO) { buildExportBundle(ids, options) }
+            val result = runCatching {
+                target.export(bundle, cfg, ExportProgress { d, t, c -> _exportRun.value = ExportRun(target.name, d, t, c) })
+            }.getOrElse { ExportResult(false, it.message ?: "Export failed") }
+            _exportRun.value = ExportRun(target.name, ids.size, ids.size, result = result)
+        }
+    }
+
     override fun onCleared() {
         cancelTranscription()
         transcriber.release()
@@ -430,6 +683,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             assistant = assistant?.name ?: ""
         )
 
+        val systemWithWiki = if (current.wikiContextInChat)
+            systemPrompt + WikiLinker.chatContext(wikiIndex.value, wikiFolders.value)
+        else systemPrompt
+
         viewModelScope.launch {
             val activeId = _activeId.value ?: newId().also { _activeId.value = it }
             val existing = store.snapshot().firstOrNull { it.id == activeId }
@@ -455,8 +712,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             store.upsert(updated)
 
             val historyForApi = mutableListOf<ChatMessage>()
-            if (systemPrompt.isNotBlank()) {
-                historyForApi.add(ChatMessage("system", systemPrompt))
+            if (systemWithWiki.isNotBlank()) {
+                historyForApi.add(ChatMessage("system", systemWithWiki))
             }
             updated.messages
                 .filter { !(it.role == "assistant" && it.content.isEmpty()) }

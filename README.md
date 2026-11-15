@@ -24,6 +24,13 @@
   flags uncertain ASR terms with `[?]`, never invents numbers) and *Project report* 📋 assistants.
 - German UI strings for the new features; installs side-by-side with upstream (`com.miniichat.lab`).
 
+- **Obsidian-style wiki** — save any AI reply as a Markdown note (photos embedded), virtual folders,
+  `[[wikilinks]]` with backlinks / unlinked mentions, tags, callouts, tables, task lists. Local auto-linking
+  plus an **AI links** button where the LLM proposes links from a compact index (you review before applying).
+  See [docs/WIKI.md](docs/WIKI.md) and the supported syntax in [docs/MARKDOWN.md](docs/MARKDOWN.md).
+- **Export** — sortable/filterable checkbox list → ZIP (Obsidian vault layout), Markdown share, or API targets
+  (generic webhook today; pluggable [Export API](docs/EXPORT_API.md) for further tools).
+
 ### Typical workflow
 
 1. Settings → Providers: add your LLM (a vision-capable model if you send photos).

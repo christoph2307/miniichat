@@ -31,7 +31,13 @@ data class AppSettings(
     val whisperTranslate: Boolean = false,    // translate speech to English
     val whisperPrompt: String = "",           // vocabulary / glossary hint
     val autoTranscribe: Boolean = true,       // transcribe right after a recording stops
-    val sendAudioToModel: Boolean = false     // also attach WAV as input_audio for audio-capable LLMs
+    val sendAudioToModel: Boolean = false,    // also attach WAV as input_audio for audio-capable LLMs
+    // --- Wiki ---
+    val wikiContextInChat: Boolean = true,    // tell the LLM about existing notes (titles) + frontmatter format
+    val wikiAutoLinkOnSave: Boolean = true,   // local [[link]] insertion for mentioned note titles
+    val wikiDefaultFolder: String = "Inbox",
+    val wikiSaveImages: Boolean = true,       // copy photos of the prompt into the note
+    val wikiSaveTranscript: Boolean = false   // keep the raw transcript as a collapsed callout
 )
 
 class SettingsRepository(private val context: Context) {
@@ -52,6 +58,11 @@ class SettingsRepository(private val context: Context) {
         val W_PROMPT = stringPreferencesKey("whisper_prompt")
         val AUTO_TRANSCRIBE = booleanPreferencesKey("auto_transcribe")
         val SEND_AUDIO = booleanPreferencesKey("send_audio_to_model")
+        val WIKI_CTX = booleanPreferencesKey("wiki_context_in_chat")
+        val WIKI_AUTOLINK = booleanPreferencesKey("wiki_autolink_on_save")
+        val WIKI_FOLDER = stringPreferencesKey("wiki_default_folder")
+        val WIKI_IMAGES = booleanPreferencesKey("wiki_save_images")
+        val WIKI_TRANSCRIPT = booleanPreferencesKey("wiki_save_transcript")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p -> read(p) }
@@ -72,7 +83,12 @@ class SettingsRepository(private val context: Context) {
         whisperTranslate = p[Keys.W_TRANSLATE] ?: false,
         whisperPrompt = p[Keys.W_PROMPT] ?: "",
         autoTranscribe = p[Keys.AUTO_TRANSCRIBE] ?: true,
-        sendAudioToModel = p[Keys.SEND_AUDIO] ?: false
+        sendAudioToModel = p[Keys.SEND_AUDIO] ?: false,
+        wikiContextInChat = p[Keys.WIKI_CTX] ?: true,
+        wikiAutoLinkOnSave = p[Keys.WIKI_AUTOLINK] ?: true,
+        wikiDefaultFolder = p[Keys.WIKI_FOLDER] ?: "Inbox",
+        wikiSaveImages = p[Keys.WIKI_IMAGES] ?: true,
+        wikiSaveTranscript = p[Keys.WIKI_TRANSCRIPT] ?: false
     )
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
@@ -94,6 +110,11 @@ class SettingsRepository(private val context: Context) {
             p[Keys.W_PROMPT] = next.whisperPrompt
             p[Keys.AUTO_TRANSCRIBE] = next.autoTranscribe
             p[Keys.SEND_AUDIO] = next.sendAudioToModel
+            p[Keys.WIKI_CTX] = next.wikiContextInChat
+            p[Keys.WIKI_AUTOLINK] = next.wikiAutoLinkOnSave
+            p[Keys.WIKI_FOLDER] = next.wikiDefaultFolder
+            p[Keys.WIKI_IMAGES] = next.wikiSaveImages
+            p[Keys.WIKI_TRANSCRIPT] = next.wikiSaveTranscript
         }
     }
 }

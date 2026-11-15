@@ -122,7 +122,14 @@ fun MiniiChatTheme(
     }
     MaterialTheme(
         colorScheme = colors,
-        typography = AppTypography,
-        content = content
-    )
+        typography = AppTypography
+    ) {
+        // There is no root Surface, so without this LocalContentColor stays at its
+        // default (black) and every Text / BasicTextField / MarkdownText that does
+        // not pass an explicit color became invisible in dark mode.
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides colors.onBackground,
+            content = content
+        )
+    }
 }

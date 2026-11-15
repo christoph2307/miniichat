@@ -102,7 +102,10 @@ fun ChatScreen(
     onRecordingFinished: (com.miniichat.audio.FinishedRecording, Boolean, (com.miniichat.data.Attachment) -> Unit) -> Unit = { _, _, _ -> },
     onImportAudio: (android.net.Uri, (com.miniichat.data.Attachment) -> Unit) -> Unit = { _, _ -> },
     onTranscribe: (com.miniichat.data.Attachment) -> Unit = {},
-    onCancelTranscription: () -> Unit = {}
+    onCancelTranscription: () -> Unit = {},
+    onSaveToWiki: (String) -> Unit = {},
+    markdownActions: MarkdownActions = MarkdownActions(),
+    onOpenWiki: () -> Unit = {}
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var pendingAttachments by remember { mutableStateOf<List<com.miniichat.data.Attachment>>(emptyList()) }
@@ -148,7 +151,8 @@ fun ChatScreen(
             providerLabel = activeProvider?.name,
             onMenu = onMenu,
             onPickModel = onPickModel,
-            onNew = onNew
+            onNew = onNew,
+            onOpenWiki = onOpenWiki
         )
 
         if (messages.isEmpty()) {
@@ -169,6 +173,8 @@ fun ChatScreen(
                     MessageItem(
                         message = msg,
                         playback = playback,
+                        markdownActions = markdownActions,
+                        onSaveToWiki = { onSaveToWiki(msg.id) },
                         senderLabel = if (msg.role == "user") "You"
                         else settings.activeModel.ifBlank { activeProvider?.name ?: "Assistant" },
                         isLastAssistant = msg.id == messages.lastOrNull()?.id && msg.role == "assistant",
@@ -270,7 +276,8 @@ private fun ChatTopBar(
     providerLabel: String?,
     onMenu: () -> Unit,
     onPickModel: () -> Unit,
-    onNew: () -> Unit
+    onNew: () -> Unit,
+    onOpenWiki: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -296,6 +303,10 @@ private fun ChatTopBar(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
+            IconButton(onClick = onOpenWiki) {
+                Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.MenuBook, contentDescription = "wiki",
+                    tint = MaterialTheme.colorScheme.onSurface)
+            }
             IconButton(onClick = onNew) {
                 Icon(Icons.Default.Edit, contentDescription = "new chat",
                     tint = MaterialTheme.colorScheme.onSurface)
@@ -356,6 +367,8 @@ private fun ChatTopBar(
 private fun MessageItem(
     message: Message,
     playback: AudioPlayback,
+    markdownActions: MarkdownActions = MarkdownActions(),
+    onSaveToWiki: () -> Unit = {},
     senderLabel: String,
     isLastAssistant: Boolean,
     isStreaming: Boolean,
@@ -388,7 +401,9 @@ private fun MessageItem(
             senderLabel = senderLabel,
             isLastAssistant = isLastAssistant,
             isStreaming = isStreaming,
-            onDelete = onDelete
+            onDelete = onDelete,
+            markdownActions = markdownActions,
+            onSaveToWiki = onSaveToWiki
         )
     }
 }
@@ -580,7 +595,9 @@ private fun AssistantRow(
     senderLabel: String,
     isLastAssistant: Boolean,
     isStreaming: Boolean,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    markdownActions: MarkdownActions = MarkdownActions(),
+    onSaveToWiki: () -> Unit = {}
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
@@ -615,7 +632,8 @@ private fun AssistantRow(
                         MarkdownText(
                             text = message.content,
                             color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            actions = markdownActions
                         )
                     }
                 }
@@ -650,7 +668,11 @@ private fun AssistantRow(
         }
         if (message.content.isNotEmpty() && (!isLastAssistant || !isStreaming)) {
             Spacer(Modifier.height(8.dp))
-            CopyButton(content = message.content)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CopyButton(content = message.content)
+                Spacer(Modifier.width(4.dp))
+                SaveToWikiButton(onSaveToWiki)
+            }
         }
     }
 }
@@ -818,6 +840,31 @@ private fun EmptyState(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SaveToWikiButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                androidx.compose.material.icons.Icons.AutoMirrored.Filled.NoteAdd,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                stringResource(R.string.save_to_wiki),
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }

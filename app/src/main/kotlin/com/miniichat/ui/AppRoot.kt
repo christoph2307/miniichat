@@ -30,7 +30,7 @@ import com.miniichat.R
 import com.miniichat.data.ProviderConfig
 import kotlinx.coroutines.launch
 
-private enum class Screen { Chat, Settings, Providers, ProviderEdit, Assistants, Speech }
+private enum class Screen { Chat, Settings, Providers, ProviderEdit, Assistants, Speech, Wiki, Note, Export, ExportTargets }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +63,32 @@ fun AppRoot(vm: ChatViewModel) {
         screen = Screen.Settings
     }
 
+    // ── wiki navigation state ──
+    var noteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var noteBackStack by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var noteReturn by rememberSaveable { mutableStateOf(Screen.Wiki) }
+    var wikiFolder by rememberSaveable { mutableStateOf("") }
+    var wikiQuery by rememberSaveable { mutableStateOf("") }
+    var exportPreselect by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var exportReturn by rememberSaveable { mutableStateOf(Screen.Wiki) }
+    var exportTargetsReturn by rememberSaveable { mutableStateOf(Screen.Export) }
+
+    fun openNote(id: String, from: Screen) {
+        if (screen == Screen.Note && noteId != null && noteId != id) noteBackStack = noteBackStack + noteId!!
+        else if (screen != Screen.Note) { noteBackStack = emptyList(); noteReturn = from }
+        noteId = id
+        screen = Screen.Note
+    }
+    fun closeNote() {
+        val prev = noteBackStack.lastOrNull()
+        if (prev != null) { noteBackStack = noteBackStack.dropLast(1); noteId = prev }
+        else screen = noteReturn
+    }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.Wiki) { screen = Screen.Chat }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.Note) { closeNote() }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.Export) { screen = exportReturn }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.ExportTargets) { screen = exportTargetsReturn }
+
     val conversations by vm.conversations.collectAsState()
     val activeId by vm.activeId.collectAsState()
     val settings by vm.settings.collectAsState()
@@ -77,6 +103,23 @@ fun AppRoot(vm: ChatViewModel) {
     val attachmentUpdate by vm.attachmentUpdates.collectAsState()
     val installedModels by vm.modelManager.installed.collectAsState()
     val hasSpeechModel = settings.whisperModel.isNotBlank() && settings.whisperModel in installedModels
+    val wikiIndex by vm.wikiIndex.collectAsState()
+    val wikiFolders by vm.wikiFolders.collectAsState()
+    val aiLink by vm.aiLink.collectAsState()
+    val exportRun by vm.exportRun.collectAsState()
+    val openNoteRequest by vm.openNote.collectAsState()
+    LaunchedEffect(openNoteRequest) {
+        openNoteRequest?.let { id ->
+            vm.consumeOpenNote()
+            openNote(id, if (screen == Screen.Note) noteReturn else screen)
+        }
+    }
+    val chatMarkdownActions = MarkdownActions(
+        onWikiLink = { target, _ -> wikiIndex.resolve(target)?.let { openNote(it.id, Screen.Chat) } },
+        linkExists = { wikiIndex.resolve(it) != null },
+        onTag = { t -> wikiQuery = "#$t"; screen = Screen.Wiki },
+        resolveAsset = { vm.wikiStore.assetFile(it) }
+    )
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
@@ -116,6 +159,10 @@ fun AppRoot(vm: ChatViewModel) {
                             onOpenSettings = {
                                 screen = Screen.Settings
                                 scope.launch { drawerState.close() }
+                            },
+                            onOpenWiki = {
+                                screen = Screen.Wiki
+                                scope.launch { drawerState.close() }
                             }
                         )
                     }
@@ -150,7 +197,10 @@ fun AppRoot(vm: ChatViewModel) {
                         onRecordingFinished = { rec, tr, add -> vm.onRecordingFinished(rec, tr, add) },
                         onImportAudio = { uri, add -> vm.importAudio(uri, add) },
                         onTranscribe = { vm.transcribe(it) },
-                        onCancelTranscription = { vm.cancelTranscription() }
+                        onCancelTranscription = { vm.cancelTranscription() },
+                        onSaveToWiki = { vm.saveMessageToWiki(it) },
+                        markdownActions = chatMarkdownActions,
+                        onOpenWiki = { screen = Screen.Wiki }
                     )
                 }
             }
@@ -163,8 +213,74 @@ fun AppRoot(vm: ChatViewModel) {
                     onChange = { vm.updateSettings(it) },
                     onOpenProviders = { screen = Screen.Providers },
                     onOpenAssistants = { screen = Screen.Assistants },
-                    onOpenSpeech = { screen = Screen.Speech }
+                    onOpenSpeech = { screen = Screen.Speech },
+                    onOpenExportTargets = { exportTargetsReturn = Screen.Settings; screen = Screen.ExportTargets }
                 )
+            }
+            Screen.Wiki -> {
+                WikiScreen(
+                    index = wikiIndex,
+                    explicitFolders = wikiFolders,
+                    folder = wikiFolder,
+                    onFolderChange = { wikiFolder = it },
+                    query = wikiQuery,
+                    onQueryChange = { wikiQuery = it },
+                    onBack = { screen = Screen.Chat },
+                    onOpenNote = { openNote(it, Screen.Wiki) },
+                    onCreateNote = { t, f -> vm.createNote(t, f) },
+                    onCreateFolder = { vm.createFolder(it) },
+                    onRenameFolder = { a, b -> vm.renameFolder(a, b) },
+                    onDeleteFolder = { vm.deleteFolder(it) },
+                    onMoveNote = { id, f -> vm.moveNote(id, f) },
+                    onDeleteNote = { vm.deleteNote(it) },
+                    onAutoLinkAll = { vm.autoLinkAll() },
+                    onExport = { exportPreselect = emptyList(); exportReturn = Screen.Wiki; screen = Screen.Export }
+                )
+            }
+            Screen.Note -> {
+                val note = noteId?.let { wikiIndex.byId[it] }
+                if (note == null) {
+                    LaunchedEffect(noteId, wikiIndex) {
+                        // note may still be loading right after creation; give up if it vanished
+                        kotlinx.coroutines.delay(400)
+                        if (noteId?.let { vm.wikiStore.get(it) } == null) closeNote()
+                    }
+                } else {
+                    NoteScreen(
+                        note = note,
+                        index = wikiIndex,
+                        explicitFolders = wikiFolders,
+                        assetResolver = { vm.wikiStore.assetFile(it) },
+                        aiLink = aiLink,
+                        onBack = { closeNote() },
+                        onSave = { vm.saveNote(it) },
+                        onOpenNote = { openNote(it, noteReturn) },
+                        onCreateLinkedNote = { t -> vm.createNote(t, note.folder) },
+                        onTag = { t -> wikiQuery = "#$t"; screen = Screen.Wiki },
+                        onToggleTask = { line, c -> vm.toggleTask(note.id, line, c) },
+                        onAutoLink = { vm.autoLinkNote(note.id) },
+                        onAiLinks = { vm.requestAiLinks(note.id) },
+                        onDismissAi = { vm.dismissAiLinks() },
+                        onApplyAi = { acc, tg, fo, al, st -> vm.applyAiLinks(acc, tg, fo, al, st) },
+                        onDelete = { vm.deleteNote(note.id); closeNote() },
+                        onExport = { exportPreselect = listOf(note.id); exportReturn = Screen.Note; screen = Screen.Export }
+                    )
+                }
+            }
+            Screen.Export -> {
+                ExportScreen(
+                    index = wikiIndex,
+                    preselected = exportPreselect.toSet(),
+                    exportRun = exportRun,
+                    onBack = { screen = exportReturn },
+                    buildBundle = { ids, o -> vm.buildExportBundle(ids, o) },
+                    onExportToTarget = { t, ids, o -> vm.exportToTarget(t, ids, o) },
+                    onClearRun = { vm.clearExportRun() },
+                    onOpenTargets = { exportTargetsReturn = Screen.Export; screen = Screen.ExportTargets }
+                )
+            }
+            Screen.ExportTargets -> {
+                ExportTargetsScreen(store = vm.exportConfig, onBack = { screen = exportTargetsReturn })
             }
             Screen.Speech -> {
                 SpeechSettingsScreen(

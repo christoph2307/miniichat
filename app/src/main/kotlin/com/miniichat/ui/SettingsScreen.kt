@@ -63,7 +63,8 @@ fun SettingsScreen(
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onOpenProviders: () -> Unit,
     onOpenAssistants: () -> Unit,
-    onOpenSpeech: () -> Unit = {}
+    onOpenSpeech: () -> Unit = {},
+    onOpenExportTargets: () -> Unit = {}
 ) {
     // Local state seeded once; LaunchedEffect resyncs only when external settings change.
     var system by rememberSaveable { mutableStateOf(settings.systemPrompt) }
@@ -230,6 +231,33 @@ fun SettingsScreen(
                 }
             }
 
+            // Wiki
+            SectionHeader(stringResource(R.string.wiki))
+            SectionCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    WikiToggle(stringResource(R.string.wiki_set_context), stringResource(R.string.wiki_set_context_hint),
+                        settings.wikiContextInChat) { v -> onChange { it.copy(wikiContextInChat = v) } }
+                    WikiToggle(stringResource(R.string.wiki_set_autolink), stringResource(R.string.wiki_set_autolink_hint),
+                        settings.wikiAutoLinkOnSave) { v -> onChange { it.copy(wikiAutoLinkOnSave = v) } }
+                    WikiToggle(stringResource(R.string.wiki_set_images), "",
+                        settings.wikiSaveImages) { v -> onChange { it.copy(wikiSaveImages = v) } }
+                    WikiToggle(stringResource(R.string.wiki_set_transcript), "",
+                        settings.wikiSaveTranscript) { v -> onChange { it.copy(wikiSaveTranscript = v) } }
+                    Spacer(Modifier.height(10.dp))
+                    var defFolder by rememberSaveable { mutableStateOf(settings.wikiDefaultFolder) }
+                    androidx.compose.material3.OutlinedTextField(
+                        value = defFolder,
+                        onValueChange = { v -> defFolder = v; onChange { it.copy(wikiDefaultFolder = v) } },
+                        label = { Text(stringResource(R.string.wiki_set_default_folder)) },
+                        singleLine = true, modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    androidx.compose.material3.TextButton(onClick = onOpenExportTargets) {
+                        Text(stringResource(R.string.export_targets))
+                    }
+                }
+            }
+
             // Appearance
             SectionHeader(stringResource(R.string.setting_appearance))
             SectionCard {
@@ -382,5 +410,17 @@ fun SettingsTopBar(title: String, onBack: () -> Unit) {
             )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+    }
+}
+
+@Composable
+private fun WikiToggle(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(modifier = Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
