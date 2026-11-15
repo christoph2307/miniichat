@@ -41,7 +41,11 @@ else()
     FetchContent_MakeAvailable(whisper)
 endif()
 
+# The same sources are built twice by Gradle: the baseline lib (app module) and an
+# ARMv8.2 lib with dot-product + FP16 instructions (:whisper-opt module), selected at runtime.
+set(WHISPER_JNI_LIB_NAME "whisper_jni" CACHE STRING "name of the JNI library")
 add_library(whisper_jni SHARED whisper_jni.cpp)
+set_target_properties(whisper_jni PROPERTIES OUTPUT_NAME ${WHISPER_JNI_LIB_NAME})
 
 if (ANDROID)
     find_library(LOG_LIB log)

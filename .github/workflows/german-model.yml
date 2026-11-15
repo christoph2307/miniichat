@@ -1,0 +1,62 @@
+name: Build German Whisper model (q5_0)
+
+# Quantizes the German fine-tune of Whisper large-v3-turbo
+# (primeline/whisper-large-v3-turbo-german, ggml conversion by cstr) to q5_0 and publishes it as
+# release asset "whisper-models/ggml-large-v3-turbo-german-q5_0.bin", which the app downloads.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/german-model.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  quantize:
+    runs-on: ubuntu-latest
+    env:
+      WHISPER_CPP_TAG: v1.7.4
+      SOURCE_URL: https://huggingface.co/cstr/whisper-large-v3-turbo-german-ggml/resolve/main/ggml-model.bin
+      OUT: ggml-large-v3-turbo-german-q5_0.bin
+    steps:
+      - name: Build whisper.cpp tools
+        run: |
+          git clone --depth 1 -b "$WHISPER_CPP_TAG" https://github.com/ggml-org/whisper.cpp
+          cmake -S whisper.cpp -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+          cmake --build build --target quantize whisper-cli -j "$(nproc)"
+          ls -la build/bin
+
+      - name: Download German model (f16, ~1.6 GB)
+        run: |
+          curl -fL --retry 5 --retry-delay 10 -o ggml-large-v3-turbo-german.bin "$SOURCE_URL"
+          ls -la ggml-large-v3-turbo-german.bin
+
+      - name: Quantize to q5_0
+        run: |
+          ./build/bin/quantize ggml-large-v3-turbo-german.bin "$OUT" q5_0
+          ls -la "$OUT"
+          sha256sum "$OUT" | tee "$OUT.sha256"
+
+      - name: Smoke test (load model + transcribe sample)
+        run: |
+          ./build/bin/whisper-cli -m "$OUT" -f whisper.cpp/samples/jfk.wav -l en -t "$(nproc)" -otxt -of smoke
+          echo "--- transcript ---"; cat smoke.txt
+          test -s smoke.txt
+
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: whisper-models
+          name: Whisper models
+          body: |
+            Whisper models for MiniiChat Lab (downloaded from Settings → Speech recognition).
+
+            * `ggml-large-v3-turbo-german-q5_0.bin` — q5_0 quantization of
+              [primeline/whisper-large-v3-turbo-german](https://huggingface.co/primeline/whisper-large-v3-turbo-german)
+              (ggml conversion: [cstr/whisper-large-v3-turbo-german-ggml](https://huggingface.co/cstr/whisper-large-v3-turbo-german-ggml)),
+              quantized with whisper.cpp ${{ env.WHISPER_CPP_TAG }}. License: Apache-2.0 (upstream model).
+          files: |
+            ${{ env.OUT }}
+            ${{ env.OUT }}.sha256
+          make_latest: false

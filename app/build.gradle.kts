@@ -14,8 +14,8 @@ android {
         applicationId = "com.miniichat.lab"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.3.0-lab"
+        versionCode = 11
+        versionName = "1.4.0-lab"
         vectorDrawables { useSupportLibrary = true }
 
         externalNativeBuild {
@@ -152,6 +152,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.0.0")
+    implementation(project(":whisper-opt"))
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

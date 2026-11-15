@@ -310,7 +310,7 @@ fun SpeechSettingsScreen(
 
             if (WhisperLib.isAvailable) {
                 Text(
-                    runCatching { WhisperLib.systemInfo() }.getOrDefault(""),
+                    "Engine: ${WhisperLib.variant} · " + runCatching { WhisperLib.systemInfo() }.getOrDefault(""),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp)

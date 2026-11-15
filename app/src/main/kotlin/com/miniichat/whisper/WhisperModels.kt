@@ -6,10 +6,12 @@ data class WhisperModel(
     val label: String,
     val sizeMb: Int,
     val englishOnly: Boolean = false,
-    val note: String = ""
+    val note: String = "",
+    /** Download URL if the file isn't in the ggerganov/whisper.cpp repo. */
+    val customUrl: String? = null
 ) {
     val fileName: String get() = "ggml-$id.bin"
-    val url: String get() = "$HF_BASE/$fileName"
+    val url: String get() = customUrl ?: "$HF_BASE/$fileName"
 
     companion object {
         const val HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
@@ -17,7 +19,16 @@ data class WhisperModel(
 }
 
 object WhisperModels {
+    /** Built by .github/workflows/german-model.yml in this repository (release "whisper-models"). */
+    const val GERMAN_RELEASE = "https://github.com/christoph2307/miniichat/releases/download/whisper-models"
+
     val catalog: List<WhisperModel> = listOf(
+        WhisperModel("large-v3-turbo-german-q5_0", "Large v3 Turbo · Deutsch (quantized)", 547,
+            note = "German fine-tune (primeline) — recommended for German",
+            customUrl = "$GERMAN_RELEASE/ggml-large-v3-turbo-german-q5_0.bin"),
+        WhisperModel("large-v3-turbo-german", "Large v3 Turbo · Deutsch", 1620,
+            note = "German fine-tune, unquantized — most accurate, slow",
+            customUrl = "https://huggingface.co/cstr/whisper-large-v3-turbo-german-ggml/resolve/main/ggml-model.bin"),
         WhisperModel("tiny-q5_1", "Tiny (quantized)", 31, note = "fastest, lowest accuracy"),
         WhisperModel("tiny", "Tiny", 75),
         WhisperModel("tiny.en", "Tiny · English", 75, englishOnly = true),
