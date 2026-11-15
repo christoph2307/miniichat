@@ -71,6 +71,8 @@ data class TranscriptionUi(
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
+    init { com.miniichat.whisper.WhisperLib.configure(app) }
+
     private val store = ConversationStore(app)
     val settingsRepo = SettingsRepository(app)
     val providerStore = ProviderStore(app)
@@ -164,6 +166,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val s = settings.value
         transcribeJob = viewModelScope.launch {
             _transcription.value = TranscriptionUi(att.uri, att.name, phase = "loading")
+            val started = android.os.SystemClock.elapsedRealtime()
             try {
                 val text = transcriber.transcribeWav(
                     modelFile = model,
@@ -181,9 +184,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         _transcription.value = _transcription.value?.copy(partial = t, phase = "transcribing")
                     }
                 )
+                val elapsed = android.os.SystemClock.elapsedRealtime() - started
+                val audioMs = att.durationMs.takeIf { it > 0 }
+                    ?: com.miniichat.audio.WavIO.readInfo(wav)?.durationMs ?: 0L
+                val engine = if (com.miniichat.whisper.WhisperLib.hasGpuDevice()) "GPU" else "CPU"
+                val speed = if (elapsed > 0 && audioMs > 0) "%.1f× realtime".format(audioMs.toDouble() / elapsed) else ""
+                val summary = "${com.miniichat.util.formatDuration(audioMs)} audio in ${com.miniichat.util.formatDuration(elapsed)}" +
+                    (if (speed.isNotEmpty()) " · $speed" else "") + " · $engine · " +
+                    model.name.removePrefix("ggml-").removeSuffix(".bin")
+                com.miniichat.whisper.WhisperLib.lastRunSummary = summary
                 if (text.isBlank()) {
-                    _toast.value = "No speech recognised"
+                    _toast.value = "No speech recognised ($summary)"
                 } else {
+                    _toast.value = "Transcribed: $summary"
                     _attachmentUpdates.value = att.copy(transcript = text)
                     _pendingTranscript.value = att.uri to text
                 }

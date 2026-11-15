@@ -26,6 +26,9 @@ object WhisperModels {
         WhisperModel("large-v3-turbo-german-q5_0", "Large v3 Turbo · Deutsch (quantized)", 547,
             note = "German fine-tune (primeline) — recommended for German",
             customUrl = "$GERMAN_RELEASE/ggml-large-v3-turbo-german-q5_0.bin"),
+        WhisperModel("large-v3-turbo-german-q8_0", "Large v3 Turbo · Deutsch (q8_0, GPU)", 834,
+            note = "German fine-tune — best choice with “Use GPU”",
+            customUrl = "$GERMAN_RELEASE/ggml-large-v3-turbo-german-q8_0.bin"),
         WhisperModel("large-v3-turbo-german", "Large v3 Turbo · Deutsch", 1620,
             note = "German fine-tune, unquantized — most accurate, slow",
             customUrl = "https://huggingface.co/cstr/whisper-large-v3-turbo-german-ggml/resolve/main/ggml-model.bin"),
@@ -40,6 +43,7 @@ object WhisperModels {
         WhisperModel("small.en", "Small · English", 466, englishOnly = true),
         WhisperModel("medium-q5_0", "Medium (quantized)", 514, note = "slow on phones, high accuracy"),
         WhisperModel("large-v3-turbo-q5_0", "Large v3 Turbo (quantized)", 547, note = "best quality/speed trade-off on flagship phones"),
+        WhisperModel("large-v3-turbo-q8_0", "Large v3 Turbo (q8_0, GPU)", 834, note = "runs fully on the GPU"),
         WhisperModel("medium", "Medium", 1500),
         WhisperModel("large-v3-turbo", "Large v3 Turbo", 1620),
     )

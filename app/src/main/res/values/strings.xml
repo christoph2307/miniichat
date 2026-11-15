@@ -202,4 +202,14 @@
     <string name="export_login_waiting">Waiting for login in the browser… come back here when done.</string>
     <string name="export_login_timeout">Login timed out — try again.</string>
     <string name="export_logout">Log out</string>
+    <!-- engine / gpu -->
+    <string name="speech_engine">Engine</string>
+    <string name="speech_engine_active">Active build: %1$s</string>
+    <string name="speech_gpu">Use GPU (experimental)</string>
+    <string name="speech_gpu_hint">OpenCL on the phone\'s GPU (e.g. Adreno). Best with q8_0 or full-precision models — q5_0 runs mostly on the CPU. Needs an app restart.</string>
+    <string name="speech_gpu_unsupported">Not available: needs a 64-bit ARMv8.2 CPU</string>
+    <string name="speech_restart">Restart app now</string>
+    <string name="speech_gpu_none">GPU build loaded, but no OpenCL GPU was found — running on CPU.</string>
+    <string name="speech_gpu_crashed">The GPU crashed during the last transcription and was switched off automatically.</string>
+    <string name="speech_last_run">Last run: %1$s</string>
 </resources>

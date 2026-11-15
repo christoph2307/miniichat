@@ -106,4 +106,14 @@
     <string name="export_login_waiting">Warte auf Anmeldung im Browser… danach hierher zurückkehren.</string>
     <string name="export_login_timeout">Anmeldung abgelaufen — bitte erneut versuchen.</string>
     <string name="export_logout">Abmelden</string>
+    <!-- engine / gpu -->
+    <string name="speech_engine">Rechenwerk</string>
+    <string name="speech_engine_active">Aktiver Build: %1$s</string>
+    <string name="speech_gpu">GPU verwenden (experimentell)</string>
+    <string name="speech_gpu_hint">OpenCL auf der Handy-GPU (z. B. Adreno). Am besten mit q8_0- oder unquantisierten Modellen — q5_0 läuft größtenteils auf der CPU. App-Neustart nötig.</string>
+    <string name="speech_gpu_unsupported">Nicht verfügbar: benötigt eine 64-Bit-ARMv8.2-CPU</string>
+    <string name="speech_restart">App jetzt neu starten</string>
+    <string name="speech_gpu_none">GPU-Build geladen, aber keine OpenCL-GPU gefunden — läuft auf der CPU.</string>
+    <string name="speech_gpu_crashed">Die GPU ist bei der letzten Transkription abgestürzt und wurde automatisch deaktiviert.</string>
+    <string name="speech_last_run">Letzter Lauf: %1$s</string>
 </resources>

@@ -285,6 +285,49 @@ fun SpeechSettingsScreen(
                 }
             }
 
+            // ---------- Engine / GPU ----------
+            SectionHeader(stringResource(R.string.speech_engine))
+            SectionCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    val v82 = remember { WhisperLib.cpuSupportsV82() }
+                    var gpuWanted by remember { mutableStateOf(WhisperLib.gpuRequested) }
+                    val devices = remember { WhisperLib.devices() }
+                    if (WhisperLib.gpuCrashRecovered) {
+                        Text(stringResource(R.string.speech_gpu_crashed), color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Text(stringResource(R.string.speech_engine_active, WhisperLib.variant),
+                        style = MaterialTheme.typography.bodyLarge)
+                    devices.forEach { (type, name, desc) ->
+                        Text("• $type: $desc ($name)", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (WhisperLib.gpuBuildLoaded && devices.none { it.first == "GPU" || it.first == "IGPU" }) {
+                        Text(stringResource(R.string.speech_gpu_none), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error)
+                    }
+                    ToggleRow(
+                        title = stringResource(R.string.speech_gpu),
+                        subtitle = if (v82) stringResource(R.string.speech_gpu_hint) else stringResource(R.string.speech_gpu_unsupported),
+                        checked = gpuWanted
+                    ) { v -> if (v82) { gpuWanted = v; WhisperLib.gpuRequested = v } }
+                    if (gpuWanted != WhisperLib.gpuBuildLoaded && v82) {
+                        TextButton(onClick = {
+                            val i = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                                ?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            if (i != null) ctx.startActivity(i)
+                            Runtime.getRuntime().exit(0)
+                        }) { Text(stringResource(R.string.speech_restart)) }
+                    }
+                    WhisperLib.lastRunSummary?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.speech_last_run, it), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+
             // ---------- Storage ----------
             SectionHeader(stringResource(R.string.speech_storage))
             SectionCard {
@@ -310,7 +353,7 @@ fun SpeechSettingsScreen(
 
             if (WhisperLib.isAvailable) {
                 Text(
-                    "Engine: ${WhisperLib.variant} · " + runCatching { WhisperLib.systemInfo() }.getOrDefault(""),
+                    runCatching { WhisperLib.systemInfo() }.getOrDefault(""),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp)

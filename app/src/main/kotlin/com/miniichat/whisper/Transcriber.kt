@@ -31,7 +31,10 @@ class Transcriber {
             throw IllegalStateException("Native whisper library failed to load: ${WhisperLib.loadError?.message}")
         }
         if (!modelFile.exists()) throw IllegalStateException("Model not found: ${modelFile.name}")
-        val ptr = withContext(Dispatchers.IO) { WhisperLib.initContext(modelFile.absolutePath, false) }
+        val gpu = WhisperLib.gpuBuildLoaded
+        val ptr = withContext(Dispatchers.IO) {
+            WhisperLib.guardGpu(gpu) { WhisperLib.initContext(modelFile.absolutePath, gpu) }
+        }
         if (ptr == 0L) throw IllegalStateException("Failed to load model ${modelFile.name} (corrupt file?)")
         ctxPtr = ptr
         loadedPath = modelFile.absolutePath
@@ -94,9 +97,9 @@ class Transcriber {
                     if (opts.initialPrompt.isNotBlank()) append(opts.initialPrompt.trim()).append(' ')
                     append(prefix.takeLast(200))
                 }.trim().ifBlank { null }
-                val text = WhisperLib.transcribe(
-                    ctxPtr, chunk, opts.language, threads, opts.translate, prompt, listener
-                )
+                val text = WhisperLib.guardGpu(WhisperLib.gpuBuildLoaded) {
+                    WhisperLib.transcribe(ctxPtr, chunk, opts.language, threads, opts.translate, prompt, listener)
+                }
                 ensureActive()
                 if (text.isNotBlank()) {
                     if (sb.isNotEmpty()) sb.append(' ')

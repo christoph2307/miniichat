@@ -14,8 +14,8 @@ android {
         applicationId = "com.miniichat.lab"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.4.0-lab"
+        versionCode = 12
+        versionName = "1.5.0-lab"
         vectorDrawables { useSupportLibrary = true }
 
         externalNativeBuild {
@@ -110,6 +110,11 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // libOpenCL.so from the Khronos ICD loader is only a link stub for :whisper-gpu;
+            // at runtime the phone's own driver (/vendor/lib64/libOpenCL.so) must be used.
+            excludes += setOf("**/libOpenCL.so")
+        }
         resources {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",
@@ -153,6 +158,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.0.0")
     implementation(project(":whisper-opt"))
+    implementation(project(":whisper-gpu"))
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

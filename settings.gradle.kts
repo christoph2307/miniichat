@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "MiniiChat"
 include(":app")
 include(":whisper-opt")
+include(":whisper-gpu")

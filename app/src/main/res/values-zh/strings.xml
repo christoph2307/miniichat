@@ -202,4 +202,14 @@
     <string name="export_login_waiting">等待在浏览器中登录… 完成后返回此处。</string>
     <string name="export_login_timeout">登录超时，请重试。</string>
     <string name="export_logout">退出登录</string>
+    <!-- engine / gpu -->
+    <string name="speech_engine">引擎</string>
+    <string name="speech_engine_active">当前构建：%1$s</string>
+    <string name="speech_gpu">使用 GPU（实验性）</string>
+    <string name="speech_gpu_hint">在手机 GPU 上使用 OpenCL（如 Adreno）。q8_0 或全精度模型效果最好，q5_0 主要在 CPU 上运行。需要重启应用。</string>
+    <string name="speech_gpu_unsupported">不可用：需要 64 位 ARMv8.2 CPU</string>
+    <string name="speech_restart">立即重启应用</string>
+    <string name="speech_gpu_none">已加载 GPU 构建，但未找到 OpenCL GPU — 使用 CPU 运行。</string>
+    <string name="speech_gpu_crashed">上次转写时 GPU 崩溃，已自动关闭。</string>
+    <string name="speech_last_run">上次运行：%1$s</string>
 </resources>

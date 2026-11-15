@@ -30,6 +30,9 @@
         android:theme="@style/Theme.MiniiChat"
         android:enableOnBackInvokedCallback="true">
 
+        <!-- GPU speech recognition: access to the vendor OpenCL driver (Android 12+ requirement) -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

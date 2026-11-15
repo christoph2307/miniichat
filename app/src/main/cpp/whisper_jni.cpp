@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstring>
 #include "whisper.h"
+#include "ggml-backend.h"
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -173,6 +174,37 @@ Java_com_miniichat_whisper_WhisperLib_transcribe(
 JNIEXPORT jstring JNICALL
 Java_com_miniichat_whisper_WhisperLib_systemInfo(JNIEnv *env, jobject) {
     return toJString(env, whisper_print_system_info());
+}
+
+/** One line per ggml compute device: "<type>\t<name>\t<description>" (type = CPU|GPU|IGPU|ACCEL). */
+JNIEXPORT jstring JNICALL
+Java_com_miniichat_whisper_WhisperLib_listDevices(JNIEnv *env, jobject) {
+    std::string out;
+    const size_t n = ggml_backend_dev_count();
+    for (size_t i = 0; i < n; ++i) {
+        ggml_backend_dev_t d = ggml_backend_dev_get(i);
+        const char *type = "?";
+        switch (ggml_backend_dev_type(d)) {
+            case GGML_BACKEND_DEVICE_TYPE_CPU:   type = "CPU"; break;
+            case GGML_BACKEND_DEVICE_TYPE_GPU:   type = "GPU"; break;
+            case GGML_BACKEND_DEVICE_TYPE_IGPU:  type = "IGPU"; break;
+            case GGML_BACKEND_DEVICE_TYPE_ACCEL: type = "ACCEL"; break;
+            default: break;
+        }
+        out += type; out += '\t';
+        out += ggml_backend_dev_name(d); out += '\t';
+        out += ggml_backend_dev_description(d); out += '\n';
+    }
+    return toJString(env, out.c_str());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_miniichat_whisper_WhisperLib_hasGpuBackend(JNIEnv *, jobject) {
+#ifdef WHISPER_JNI_HAS_GPU
+    return JNI_TRUE;
+#else
+    return JNI_FALSE;
+#endif
 }
 
 JNIEXPORT jstring JNICALL

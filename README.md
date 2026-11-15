@@ -40,14 +40,22 @@
 4. In the chat: tap 🎤, describe the experiment, tap **Done** → transcript appears. `+` → *Take photo* of the setup.
    Send. Edit/regenerate as needed; everything stays in local chat history.
 
+**Engine builds** (picked automatically at start, see Settings → Speech recognition → Engine):
+baseline (any CPU) · ARMv8.2 dot-product/FP16 (most phones since 2019, much faster) ·
+**GPU (experimental)** — OpenCL with Qualcomm's Adreno kernels, enabled with "Use GPU" (+ app restart).
+On the GPU use **q8_0** or full-precision models; q5_0 matrix multiplications fall back to the CPU.
+If the GPU driver crashes, GPU mode is switched off automatically on the next start.
+
 | Model | Size | Notes |
 | --- | --- | --- |
 | tiny-q5_1 | 31 MB | fastest, rough |
 | base-q5_1 | 57 MB | good quick default |
 | small-q5_1 | 181 MB | recommended for German / technical speech |
 | large-v3-turbo-q5_0 | 547 MB | best quality; needs a recent phone |
+| **large-v3-turbo-german-q5_0** | 547 MB | German fine-tune (primeline), CPU — built by `.github/workflows/german-model.yml` |
+| **large-v3-turbo-german-q8_0** | 834 MB | German fine-tune for **GPU** mode |
 
-Native code: `app/src/main/cpp/` (CMake fetches whisper.cpp `v1.7.4` at build time — the build needs internet and git).
+Native code: `app/src/main/cpp/` (CMake fetches whisper.cpp `v1.9.5` at build time — the build needs internet and git).
 Kotlin: `audio/` (recorder, service, decoder, WAV I/O), `whisper/` (JNI, models, downloader, chunked transcriber),
 `ui/AudioUi.kt`, `ui/SpeechSettingsScreen.kt`.
 
