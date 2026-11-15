@@ -214,7 +214,7 @@ object ExportPreparer {
             val myPath = paths.getValue(n.id)
             val myDir = myPath.substringBeforeLast('/', "")
             val docAssets = mutableListOf<ExportAsset>()
-            val cleanSource = stripAppLinks(n.body)
+            val cleanSource = stripAudio(stripAppLinks(n.body))
             val body = convertLinks(cleanSource, index, options.linkStyle) { target, isEmbed ->
                 if (isEmbed) {
                     val f = assetResolver(target)
@@ -250,6 +250,31 @@ object ExportPreparer {
             titleOf = { id -> index.byId[id]?.title },
             assetFile = { name -> assetResolver(name) }
         )
+    }
+
+    /**
+     * Recordings never leave the phone: audio embeds are removed from every export
+     * (ZIP, Markdown share, Nextcloud, Outline, webhook), and a Recordings section that only
+     * contained audio is dropped. Transcribed text in the note itself is kept.
+     */
+    fun stripAudio(body: String): String {
+        val audioLink = Regex("!\\[\\[([^\\]|#]+)(?:#[^\\]|]*)?(?:\\|[^\\]]*)?]]")
+        // lines that are nothing but an audio embed (optionally as list item) disappear completely
+        var out = body.lines().filterNot { line ->
+            val t = line.trim().removePrefix("- ").removePrefix("* ").trim()
+            val m = audioLink.matchEntire(t)
+            m != null && com.miniichat.wiki.WikiMerge.isAudio(m.groupValues[1].trim())
+        }.joinToString("\n")
+        out = audioLink.replace(out) { m -> if (com.miniichat.wiki.WikiMerge.isAudio(m.groupValues[1].trim())) "" else m.value }
+        // markdown-style audio links/images pointing at audio files
+        out = Regex("!?\\[[^\\]\\n]*]\\(([^)\\s]+)\\)").replace(out) { m ->
+            if (com.miniichat.wiki.WikiMerge.isAudio(m.groupValues[1].substringBefore('#'))) "" else m.value
+        }
+        // drop list bullets / lines left empty by the removal
+        out = out.lines().filterNot { it.trim() == "-" || it.trim() == "*" }.joinToString("\n")
+        // remove now-empty "Recordings" sections
+        out = Regex("^## (Recordings|Aufnahmen|Audio)[ \\t]*\\n(?:[ \\t]*\\n)*(?=^#{1,2} |^> \\[!|\\z)", RegexOption.MULTILINE).replace(out, "")
+        return out.replace(Regex("\\n{3,}"), "\n\n")
     }
 
     /** In-app links (`miniichat://chat/…`) mean nothing outside the app → keep only the label. */

@@ -87,6 +87,12 @@ existing remote pages instead of creating duplicates. Configuration, including a
 and API keys, is stored in **EncryptedSharedPreferences** (AES-256, key in the Android
 Keystore). In-app links (`miniichat://chat/…`) are reduced to their label on export.
 
+**Recordings are never exported.** `ExportPreparer.stripAudio` removes audio embeds (`![[rec.wav]]`,
+links to `.wav/.m4a/.mp3/.ogg/.opus/.flac/.aac`) from every document before any target sees it,
+and drops a *Recordings* section that only contained audio. The audio files are therefore not
+in the bundle's assets: they don't go into the ZIP, aren't uploaded to Nextcloud or Outline and
+aren't base64-encoded for webhooks. Transcribed text in the note body is exported as usual.
+
 Candidates to choose from: Obsidian via Git or Syncthing folder, Nextcloud or WebDAV, Notion,
 Confluence, eLabFTW, OneNote (Graph API), Google Drive, Zotero notes, BookStack, Outline,
 GitHub/GitLab wiki.
