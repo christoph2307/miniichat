@@ -312,6 +312,13 @@ fun SettingsScreen(
                     Text(stringResource(R.string.about_text),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
+                    val version = remember {
+                        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
+                    }
+                    Text("Version $version",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
