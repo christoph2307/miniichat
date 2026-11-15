@@ -5,7 +5,14 @@
 1. Dictate (🎤) and/or take photos → send to the LLM (e.g. *Lab notebook* assistant).
 2. The LLM returns Markdown. Because the chat system prompt includes the **wiki index**
    (titles, folders, tags), the reply already comes with frontmatter and `[[links]]` to existing notes.
-3. Tap **Save to wiki** under the reply:
+3. Decide on the reply in the bar under it:
+   - **Accept → Wiki**: saves it (as below), adds a link back to the chat in a collapsed
+     `> [!info]- Source` callout, **archives the chat** so the chat list stays short, and opens the note.
+     Archived chats live under *Archived chats* in the drawer. Tapping the source link reopens them.
+   - **Reject**: deletes the answer and regenerates it automatically from the same prompt.
+     The ✎ button rejects **with feedback**. Your note is added to the prompt for this one request only.
+   - (**Save to wiki** under any older reply saves without archiving.)
+   Saving does the following:
    - frontmatter / first `# H1` → title, folder, tags (fallback folder: *Settings → Wiki → Default folder*)
    - photos from your prompt are copied to `assets/` and embedded as `![[photo.jpg]]`
    - optional: raw transcript kept in a collapsed `> [!quote]-` callout

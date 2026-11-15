@@ -58,6 +58,8 @@ data class ExportDocument(
     val markdown: String,
     /** Body only, links converted, no frontmatter. */
     val body: String,
+    /** Original body with `[[wikilinks]]` / `![[embeds]]` — for targets that resolve links themselves. */
+    val sourceBody: String,
     /** Titles of notes this document links to (resolved, inside or outside the selection). */
     val linksTo: List<String>,
     val linkedFrom: List<String>,
@@ -68,8 +70,67 @@ data class ExportBundle(
     val documents: List<ExportDocument>,
     val assets: List<ExportAsset>,
     val options: ExportOptions,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /** `[[target]]` → note id (works for notes outside the selection too). */
+    val resolveNoteId: (String) -> String? = { null },
+    /** Note id → title, for notes outside the selection. */
+    val titleOf: (String) -> String? = { null },
+    /** `![[name]]` → local file. */
+    val assetFile: (String) -> File? = { null }
 )
+
+/**
+ * Small persistent key/value store per target (remote ids, uploaded asset URLs, …) so that
+ * exporting a note again **updates** the remote page instead of creating a duplicate.
+ */
+interface ExportState {
+    fun get(key: String): String?
+    fun put(key: String, value: String)
+    fun remove(key: String)
+}
+
+/** JSON-file backed [ExportState]. */
+class FileExportState(private val file: File) : ExportState {
+    private val map: MutableMap<String, String> = runCatching {
+        val o = kotlinx.serialization.json.Json.parseToJsonElement(file.readText()) as kotlinx.serialization.json.JsonObject
+        o.mapValues { (it.value as kotlinx.serialization.json.JsonPrimitive).content }.toMutableMap()
+    }.getOrElse { mutableMapOf() }
+
+    override fun get(key: String) = synchronized(map) { map[key] }
+    override fun put(key: String, value: String) = synchronized(map) { map[key] = value; flush() }
+    override fun remove(key: String) = synchronized(map) { map.remove(key); flush() }
+    private fun flush() {
+        file.parentFile?.mkdirs()
+        val o = kotlinx.serialization.json.JsonObject(map.mapValues { kotlinx.serialization.json.JsonPrimitive(it.value) })
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        tmp.writeText(o.toString())
+        if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+    }
+}
+
+class MemoryExportState : ExportState {
+    val map = mutableMapOf<String, String>()
+    override fun get(key: String) = map[key]
+    override fun put(key: String, value: String) { map[key] = value }
+    override fun remove(key: String) { map.remove(key) }
+}
+
+/** Result of starting an interactive (browser) login. */
+data class LoginStart(val browserUrl: String, val pollUrl: String, val token: String)
+
+/**
+ * Optional browser-based login (e.g. Nextcloud Login Flow v2). The UI opens [LoginStart.browserUrl],
+ * then calls [poll] every few seconds until it returns config values to store (user, app password, …).
+ */
+interface InteractiveLogin {
+    val label: String
+    /** Keys whose presence means "logged in" (shown as such in the UI). */
+    val credentialKeys: List<String>
+    suspend fun begin(config: Map<String, String>): LoginStart
+    /** null = not finished yet; throws on hard failure. */
+    suspend fun poll(start: LoginStart): Map<String, String>?
+    fun describe(config: Map<String, String>): String? = null
+}
 
 enum class FieldType { TEXT, MULTILINE, URL, SECRET, BOOLEAN, CHOICE, NUMBER }
 
@@ -113,10 +174,13 @@ interface ExportTarget {
     /** false → shown as "planned" in the UI (no export possible yet). */
     val available: Boolean get() = true
 
+    /** Browser login flow, if the service supports one. */
+    val login: InteractiveLogin? get() = null
+
     /** Optional connectivity/auth check used by the "Test" button. */
     suspend fun test(config: Map<String, String>): ExportResult = ExportResult(true, "No test available")
 
-    suspend fun export(bundle: ExportBundle, config: Map<String, String>, progress: ExportProgress): ExportResult
+    suspend fun export(bundle: ExportBundle, config: Map<String, String>, state: ExportState, progress: ExportProgress): ExportResult
 
     fun missingRequired(config: Map<String, String>): List<ConfigField> =
         fields.filter { it.required && config[it.key].isNullOrBlank() && it.default.isBlank() }
@@ -150,7 +214,8 @@ object ExportPreparer {
             val myPath = paths.getValue(n.id)
             val myDir = myPath.substringBeforeLast('/', "")
             val docAssets = mutableListOf<ExportAsset>()
-            val body = convertLinks(n.body, index, options.linkStyle) { target, isEmbed ->
+            val cleanSource = stripAppLinks(n.body)
+            val body = convertLinks(cleanSource, index, options.linkStyle) { target, isEmbed ->
                 if (isEmbed) {
                     val f = assetResolver(target)
                     if (f != null && f.exists() && options.includeAssets) {
@@ -173,14 +238,23 @@ object ExportPreparer {
             ExportDocument(
                 id = n.id, title = n.title, folder = n.folder, tags = index.allTags(n), aliases = n.aliases,
                 created = n.created, updated = n.updated, relativePath = myPath,
-                markdown = md, body = body,
+                markdown = md, body = body, sourceBody = cleanSource,
                 linksTo = index.outgoing[n.id].orEmpty().mapNotNull { index.resolve(it.target)?.title }.distinct(),
                 linkedFrom = index.backlinks[n.id].orEmpty().mapNotNull { index.byId[it]?.title },
                 assets = docAssets.distinct()
             )
         }
-        return ExportBundle(docs, allAssets.values.toList(), options)
+        return ExportBundle(
+            docs, allAssets.values.toList(), options,
+            resolveNoteId = { t -> index.resolve(t)?.id },
+            titleOf = { id -> index.byId[id]?.title },
+            assetFile = { name -> assetResolver(name) }
+        )
     }
+
+    /** In-app links (`miniichat://chat/…`) mean nothing outside the app → keep only the label. */
+    fun stripAppLinks(body: String): String =
+        body.replace(Regex("\\[([^\\]\\n]*)]\\(miniichat://[^)\\s]*\\)"), "$1")
 
     private fun linkText(title: String, myDir: String, paths: Map<String, String>, index: WikiIndex, o: ExportOptions): String {
         val n = index.resolve(title)

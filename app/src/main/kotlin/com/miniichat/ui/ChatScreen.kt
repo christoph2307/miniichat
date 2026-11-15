@@ -40,6 +40,7 @@ import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -107,9 +108,14 @@ fun ChatScreen(
     onCancelTranscription: () -> Unit = {},
     onSaveToWiki: (String) -> Unit = {},
     markdownActions: MarkdownActions = MarkdownActions(),
-    onOpenWiki: () -> Unit = {}
+    onOpenWiki: () -> Unit = {},
+    onAccept: (String) -> Unit = {},
+    onReject: (String, String?) -> Unit = { _, _ -> },
+    savedMessageIds: Set<String> = emptySet(),
+    onOpenSavedNote: (String) -> Unit = {}
 ) {
     var input by rememberSaveable { mutableStateOf("") }
+    var feedbackFor by remember { mutableStateOf<String?>(null) }
     var pendingAttachments by remember { mutableStateOf<List<com.miniichat.data.Attachment>>(emptyList()) }
     val playback = rememberAudioPlayback()
 
@@ -206,36 +212,28 @@ fun ChatScreen(
             }
         }
 
+        // ── decision bar: accept the generated Markdown into the wiki, or reject & regenerate ──
+        val last = messages.lastOrNull()
         AnimatedVisibility(
-            visible = messages.isNotEmpty()
-                && messages.last().role == "assistant"
-                && !isStreaming
-                && messages.last().content.isNotEmpty(),
+            visible = last != null && last.role == "assistant" && !isStreaming && last.content.isNotEmpty(),
             enter = fadeIn(), exit = fadeOut()
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
-                        .clickable(onClick = onRegenerate)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            stringResource(R.string.regenerate),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-            }
+            if (last != null) DecisionBar(
+                saved = last.id in savedMessageIds,
+                onAccept = { onAccept(last.id) },
+                onReject = { onReject(last.id, null) },
+                onRejectWithFeedback = { feedbackFor = last.id },
+                onOpenNote = { onOpenSavedNote(last.id) },
+                onRegenerate = onRegenerate
+            )
+        }
+        feedbackFor?.let { id ->
+            TextPromptDialog(
+                title = stringResource(R.string.decision_reject_feedback),
+                label = stringResource(R.string.decision_feedback_hint),
+                initial = "",
+                onDismiss = { feedbackFor = null }
+            ) { fb -> feedbackFor = null; onReject(id, fb.ifBlank { null }) }
         }
 
         if (transcription != null) {
@@ -868,5 +866,66 @@ private fun SaveToWikiButton(onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.primary
             )
         }
+    }
+}
+
+@Composable
+private fun DecisionBar(
+    saved: Boolean,
+    onAccept: () -> Unit,
+    onReject: () -> Unit,
+    onRejectWithFeedback: () -> Unit,
+    onOpenNote: () -> Unit,
+    onRegenerate: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (saved) {
+            DecisionChip(Icons.Default.Check, stringResource(R.string.decision_in_wiki),
+                MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer, onOpenNote)
+            DecisionChip(Icons.Default.Refresh, stringResource(R.string.regenerate),
+                Color.Transparent, MaterialTheme.colorScheme.onSurface, onRegenerate, outlined = true)
+        } else {
+            DecisionChip(Icons.Default.Check, stringResource(R.string.decision_accept),
+                MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimary, onAccept)
+            DecisionChip(Icons.Default.Close, stringResource(R.string.decision_reject),
+                MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, onReject)
+            Box(
+                modifier = Modifier.size(36.dp).clip(CircleShape)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                    .clickable(onClick = onRejectWithFeedback),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.decision_reject_feedback),
+                    modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DecisionChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    bg: Color,
+    fg: Color,
+    onClick: () -> Unit,
+    outlined: Boolean = false
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(bg)
+            .then(if (outlined) Modifier.border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp)) else Modifier)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = fg)
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = fg)
     }
 }

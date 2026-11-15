@@ -76,7 +76,9 @@ data class MarkdownActions(
     /** Resolve `![[name]]` / `![alt](path)` to a local file. */
     val resolveAsset: ((String) -> File?)? = null,
     /** Toggle `- [ ]` at the given 0-based source line. */
-    val onToggleTask: ((line: Int, checked: Boolean) -> Unit)? = null
+    val onToggleTask: ((line: Int, checked: Boolean) -> Unit)? = null,
+    /** In-app links such as `miniichat://chat/<id>`. */
+    val onAppLink: ((String) -> Unit)? = null
 )
 
 /**
@@ -642,7 +644,11 @@ private fun parseInline(text: String, ctx: InlineCtx): AnnotatedString = buildAn
                     val url = t.substring(close + 2, urlEnd).trim().substringBefore(' ')
                     val style = TextLinkStyles(SpanStyle(color = ctx.link, textDecoration = TextDecoration.Underline))
                     val isRelativeMd = !url.contains("://") && (url.endsWith(".md") || url.contains(".md#"))
-                    if (isRelativeMd && ctx.actions.onWikiLink != null) {
+                    if (url.startsWith("miniichat://")) {
+                        val cb = ctx.actions.onAppLink
+                        if (cb != null) withLink(LinkAnnotation.Clickable("app:$url", style) { cb(url) }) { append(label.ifBlank { url }) }
+                        else withStyle(style.style ?: SpanStyle()) { append(label) }
+                    } else if (isRelativeMd && ctx.actions.onWikiLink != null) {
                         val target = java.net.URLDecoder.decode(url.substringBefore('#').substringAfterLast('/').removeSuffix(".md"), "UTF-8")
                         val heading = url.substringAfter('#', "").ifBlank { null }
                         withLink(LinkAnnotation.Clickable("md:$url", style) { ctx.actions.onWikiLink?.invoke(target, heading) }) {

@@ -91,4 +91,19 @@
     <string name="export_planned">geplant</string>
     <string name="export_test">Testen</string>
     <string name="export_targets_intro">Externe Ziele für das Wiki. Jedes Ziel definiert eigene Einstellungen. Weitere Tools folgen hier.</string>
+    <!-- decision / archive / integrations -->
+    <string name="decision_accept">Übernehmen → Wiki</string>
+    <string name="decision_reject">Verwerfen</string>
+    <string name="decision_reject_feedback">Verwerfen mit Hinweis</string>
+    <string name="decision_feedback_hint">Was soll anders sein?</string>
+    <string name="decision_in_wiki">Im Wiki — öffnen</string>
+    <string name="archive">Archivieren</string>
+    <string name="unarchive">Wiederherstellen</string>
+    <string name="archive_show">Archivierte Chats (%1$d)</string>
+    <string name="archive_back">← Zurück zu den Chats</string>
+    <string name="export_targets_sub">Nextcloud, Outline, Webhook — URLs &amp; Anmeldung</string>
+    <string name="export_open">Öffnen</string>
+    <string name="export_login_waiting">Warte auf Anmeldung im Browser… danach hierher zurückkehren.</string>
+    <string name="export_login_timeout">Anmeldung abgelaufen — bitte erneut versuchen.</string>
+    <string name="export_logout">Abmelden</string>
 </resources>

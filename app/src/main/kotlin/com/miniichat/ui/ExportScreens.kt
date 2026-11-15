@@ -329,7 +329,14 @@ fun ExportScreen(
                     }
                 }
             },
-            confirmButton = { if (run.result != null) TextButton(onClick = onClearRun) { Text(stringResource(R.string.ok)) } }
+            confirmButton = { if (run.result != null) TextButton(onClick = onClearRun) { Text(stringResource(R.string.ok)) } },
+            dismissButton = {
+                val loc = run.result?.location
+                if (loc != null && loc.startsWith("http")) TextButton(onClick = {
+                    runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(loc))) }
+                    onClearRun()
+                }) { Text(stringResource(R.string.export_open)) }
+            }
         )
     }
 }
@@ -380,6 +387,48 @@ private fun TargetCard(t: ExportTarget, store: ExportConfigStore) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(t.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val login = t.login
+        if (loaded && login != null) {
+            var status by remember { mutableStateOf(login.describe(values)) }
+            var pending by remember { mutableStateOf(false) }
+            LaunchedEffect(values) { if (!pending) status = login.describe(values) }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(enabled = !pending, onClick = {
+                    scope.launch {
+                        pending = true
+                        try {
+                            store.set(t.id, values) // persist server URL first
+                            val start = login.begin(values)
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(start.browserUrl)))
+                            status = ctx.getString(R.string.export_login_waiting)
+                            var creds: Map<String, String>? = null
+                            val deadline = System.currentTimeMillis() + 15 * 60_000L
+                            while (creds == null && System.currentTimeMillis() < deadline) {
+                                kotlinx.coroutines.delay(2500)
+                                creds = login.poll(start)
+                            }
+                            if (creds != null) {
+                                store.update(t.id, creds)
+                                values = store.get(t.id)
+                                status = login.describe(values) ?: "OK"
+                            } else status = ctx.getString(R.string.export_login_timeout)
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            status = "✗ " + (e.message ?: "Login failed")
+                        } finally { pending = false }
+                    }
+                }) { Text(login.label) }
+                if (!pending && login.credentialKeys.all { !values[it].isNullOrBlank() }) {
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        scope.launch { store.clear(t.id, login.credentialKeys); values = store.get(t.id) }
+                    }) { Text(stringResource(R.string.export_logout)) }
+                }
+            }
+            status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
         if (loaded) t.fields.forEach { f -> FieldEditor(f, values[f.key] ?: f.default) { v -> values = values + (f.key to v) } }
         if (loaded && t.fields.isNotEmpty()) Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {

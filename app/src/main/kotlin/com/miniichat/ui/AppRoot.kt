@@ -120,6 +120,18 @@ fun AppRoot(vm: ChatViewModel) {
         onTag = { t -> wikiQuery = "#$t"; screen = Screen.Wiki },
         resolveAsset = { vm.wikiStore.assetFile(it) }
     )
+    fun openAppLink(url: String) {
+        val chatId = url.removePrefix("miniichat://chat/").substringBefore('/').takeIf { url.startsWith("miniichat://chat/") }
+        if (chatId != null) {
+            if (conversations.any { it.id == chatId }) { vm.openConversation(chatId); screen = Screen.Chat }
+            else vm.showToast("The source chat was deleted")
+        }
+    }
+    val savedMessageIds = remember(wikiIndex, activeId) {
+        wikiIndex.notes.mapNotNull { n ->
+            n.source.removePrefix("chat:").takeIf { n.source.startsWith("chat:${activeId}/") }?.substringAfter('/')
+        }.toSet()
+    }
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
@@ -163,7 +175,8 @@ fun AppRoot(vm: ChatViewModel) {
                             onOpenWiki = {
                                 screen = Screen.Wiki
                                 scope.launch { drawerState.close() }
-                            }
+                            },
+                            onArchive = { id, a -> vm.archiveConversation(id, a) }
                         )
                     }
                 ) {
@@ -200,7 +213,13 @@ fun AppRoot(vm: ChatViewModel) {
                         onCancelTranscription = { vm.cancelTranscription() },
                         onSaveToWiki = { vm.saveMessageToWiki(it) },
                         markdownActions = chatMarkdownActions,
-                        onOpenWiki = { screen = Screen.Wiki }
+                        onOpenWiki = { screen = Screen.Wiki },
+                        onAccept = { vm.acceptReply(it) },
+                        onReject = { id, fb -> vm.rejectReply(id, fb) },
+                        savedMessageIds = savedMessageIds,
+                        onOpenSavedNote = { msgId ->
+                            wikiIndex.notes.firstOrNull { it.source == "chat:$activeId/$msgId" }?.let { openNote(it.id, Screen.Chat) }
+                        }
                     )
                 }
             }
@@ -263,7 +282,8 @@ fun AppRoot(vm: ChatViewModel) {
                         onDismissAi = { vm.dismissAiLinks() },
                         onApplyAi = { acc, tg, fo, al, st -> vm.applyAiLinks(acc, tg, fo, al, st) },
                         onDelete = { vm.deleteNote(note.id); closeNote() },
-                        onExport = { exportPreselect = listOf(note.id); exportReturn = Screen.Note; screen = Screen.Export }
+                        onExport = { exportPreselect = listOf(note.id); exportReturn = Screen.Note; screen = Screen.Export },
+                        onAppLink = { openAppLink(it) }
                     )
                 }
             }

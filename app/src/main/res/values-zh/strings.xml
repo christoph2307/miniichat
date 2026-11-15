@@ -187,4 +187,19 @@
     <string name="export_planned">计划中</string>
     <string name="export_test">测试</string>
     <string name="export_targets_intro">Wiki 的远程目标。每个目标定义自己的设置，更多工具将在此添加。</string>
+    <!-- decision / archive / integrations -->
+    <string name="decision_accept">接受 → Wiki</string>
+    <string name="decision_reject">拒绝</string>
+    <string name="decision_reject_feedback">拒绝并说明</string>
+    <string name="decision_feedback_hint">需要改哪里？</string>
+    <string name="decision_in_wiki">已在 Wiki — 打开</string>
+    <string name="archive">归档</string>
+    <string name="unarchive">取消归档</string>
+    <string name="archive_show">已归档聊天（%1$d）</string>
+    <string name="archive_back">← 返回聊天</string>
+    <string name="export_targets_sub">Nextcloud、Outline、Webhook — 地址和登录</string>
+    <string name="export_open">打开</string>
+    <string name="export_login_waiting">等待在浏览器中登录… 完成后返回此处。</string>
+    <string name="export_login_timeout">登录超时，请重试。</string>
+    <string name="export_logout">退出登录</string>
 </resources>

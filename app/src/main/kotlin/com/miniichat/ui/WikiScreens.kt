@@ -400,7 +400,8 @@ fun NoteScreen(
     onDismissAi: () -> Unit,
     onApplyAi: (Set<String>, Boolean, Boolean, Boolean, Boolean) -> Unit,
     onDelete: () -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    onAppLink: (String) -> Unit = {}
 ) {
     var editing by rememberSaveable(note.id) { mutableStateOf(note.body.isBlank()) }
     var title by rememberSaveable(note.id) { mutableStateOf(note.title) }
@@ -439,7 +440,8 @@ fun NoteScreen(
         linkExists = { index.resolve(it) != null },
         onTag = onTag,
         resolveAsset = assetResolver,
-        onToggleTask = onToggleTask
+        onToggleTask = onToggleTask,
+        onAppLink = onAppLink
     )
 
     Column(

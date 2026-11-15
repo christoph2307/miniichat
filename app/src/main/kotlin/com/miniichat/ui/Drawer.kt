@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -69,15 +71,19 @@ fun GlassDrawer(
     onDelete: (String) -> Unit,
     onRename: (String, String) -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenWiki: () -> Unit = {}
+    onOpenWiki: () -> Unit = {},
+    onArchive: (String, Boolean) -> Unit = { _, _ -> }
 ) {
     var renameTarget by remember { mutableStateOf<Conversation?>(null) }
+    var showArchived by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<Conversation?>(null) }
     var query by remember { mutableStateOf("") }
 
-    val filtered = remember(conversations, query) {
-        if (query.isBlank()) conversations
-        else conversations.filter { it.title.contains(query, ignoreCase = true) }
+    val archived = remember(conversations) { conversations.filter { it.archived } }
+    val filtered = remember(conversations, query, showArchived) {
+        val base = if (showArchived) archived else conversations.filter { !it.archived }
+        if (query.isBlank()) base
+        else base.filter { it.title.contains(query, ignoreCase = true) }
     }
     val grouped = remember(filtered) { groupConversationsByDate(filtered) }
 
@@ -192,13 +198,29 @@ fun GlassDrawer(
                                 selected = conv.id == activeId,
                                 onClick = { onSelect(conv.id) },
                                 onRename = { renameTarget = conv },
-                                onDelete = { deleteTarget = conv }
+                                onDelete = { deleteTarget = conv },
+                                onArchive = { onArchive(conv.id, !conv.archived) }
                             )
                         }
                     }
                 }
             }
 
+            if (archived.isNotEmpty() || showArchived) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { showArchived = !showArchived }
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Archive, contentDescription = null, modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (showArchived) stringResource(R.string.archive_back) else stringResource(R.string.archive_show, archived.size),
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
             Row(
                 modifier = Modifier
@@ -282,7 +304,8 @@ private fun ChatRow(
     selected: Boolean,
     onClick: () -> Unit,
     onRename: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onArchive: () -> Unit = {}
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val bg = if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
@@ -317,6 +340,11 @@ private fun ChatRow(
                     text = { Text(stringResource(R.string.rename)) },
                     leadingIcon = { Icon(Icons.Default.Edit, null) },
                     onClick = { menuOpen = false; onRename() }
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (conv.archived) R.string.unarchive else R.string.archive)) },
+                    leadingIcon = { Icon(if (conv.archived) Icons.Default.Unarchive else Icons.Default.Archive, null) },
+                    onClick = { menuOpen = false; onArchive() }
                 )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.delete)) },

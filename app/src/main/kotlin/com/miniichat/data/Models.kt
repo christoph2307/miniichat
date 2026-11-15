@@ -32,5 +32,9 @@ data class Conversation(
     val title: String,
     val messages: List<Message> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    /** Hidden from the main chat list (e.g. after its result was accepted into the wiki). */
+    val archived: Boolean = false,
+    /** Wiki note created from this chat, if any. */
+    val wikiNoteId: String? = null
 )

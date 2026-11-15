@@ -44,6 +44,12 @@ class ConversationStore(private val context: Context) {
         save(snapshot().filterNot { it.id == id })
     }
 
+    suspend fun update(id: String, transform: (Conversation) -> Conversation) {
+        val current = snapshot().toMutableList()
+        val idx = current.indexOfFirst { it.id == id }
+        if (idx >= 0) { current[idx] = transform(current[idx]); save(current) }
+    }
+
     suspend fun rename(id: String, newTitle: String) {
         val current = snapshot().toMutableList()
         val idx = current.indexOfFirst { it.id == id }

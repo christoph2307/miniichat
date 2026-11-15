@@ -187,4 +187,19 @@
     <string name="export_planned">planned</string>
     <string name="export_test">Test</string>
     <string name="export_targets_intro">Remote destinations for the wiki. Each target declares its own settings. More tools will be added here.</string>
+    <!-- decision / archive / integrations -->
+    <string name="decision_accept">Accept → Wiki</string>
+    <string name="decision_reject">Reject</string>
+    <string name="decision_reject_feedback">Reject with feedback</string>
+    <string name="decision_feedback_hint">What should be different?</string>
+    <string name="decision_in_wiki">In wiki — open</string>
+    <string name="archive">Archive</string>
+    <string name="unarchive">Unarchive</string>
+    <string name="archive_show">Archived chats (%1$d)</string>
+    <string name="archive_back">← Back to chats</string>
+    <string name="export_targets_sub">Nextcloud, Outline, webhook — URLs &amp; login</string>
+    <string name="export_open">Open</string>
+    <string name="export_login_waiting">Waiting for login in the browser… come back here when done.</string>
+    <string name="export_login_timeout">Login timed out — try again.</string>
+    <string name="export_logout">Log out</string>
 </resources>

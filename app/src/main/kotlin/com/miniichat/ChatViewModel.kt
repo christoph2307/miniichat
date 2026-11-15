@@ -307,7 +307,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
      * frontmatter/H1 → title/folder/tags, photos of the preceding prompt → assets + embeds,
      * optional raw transcript, then local auto-linking. Saving the same message again updates the note.
      */
-    fun saveMessageToWiki(messageId: String) {
+    fun saveMessageToWiki(messageId: String, archive: Boolean = false) {
         viewModelScope.launch {
             val convId = _activeId.value ?: return@launch
             val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
@@ -353,11 +353,52 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val (linked, _) = WikiIndex(wikiStore.notes.value.filter { it.id != note.id } + note).autoLink(note.body, note.id)
                 note = note.copy(body = linked)
             }
+            // back-link to the originating chat (in-app link; stripped on export)
+            if (!note.body.contains("miniichat://chat/$convId")) {
+                val date = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(conv.createdAt))
+                val chatTitle = conv.title.ifBlank { "Chat" }.replace("[", "(").replace("]", ")")
+                note = note.copy(body = note.body.trimEnd() + "\n\n> [!info]- Source\n> Chat: [$chatTitle](miniichat://chat/$convId) · $date\n")
+            }
             val saved = wikiStore.save(note)
-            _toast.value = (if (existing != null) "Updated wiki note: " else "Saved to wiki: ") + saved.title
+            store.update(convId) { it.copy(wikiNoteId = saved.id, archived = it.archived || archive) }
+            if (archive && _activeId.value == convId) _activeId.value = null
+            _toast.value = (if (existing != null) "Updated wiki note: " else "Saved to wiki: ") + saved.title +
+                if (archive) " · chat archived" else ""
             _openNote.value = saved.id
         }
     }
+
+    /** ✓ Accept: save the reply to the wiki, link the chat, archive it and start a fresh chat. */
+    fun acceptReply(messageId: String) = saveMessageToWiki(messageId, archive = true)
+
+    /**
+     * ✗ Reject: delete this answer (and anything after it) and regenerate from the prompt
+     * that produced it, optionally with reviewer feedback.
+     */
+    fun rejectReply(messageId: String, feedback: String? = null) {
+        if (_isStreaming.value) return
+        viewModelScope.launch {
+            val convId = _activeId.value ?: return@launch
+            val conv = store.snapshot().firstOrNull { it.id == convId } ?: return@launch
+            val idx = conv.messages.indexOfFirst { it.id == messageId }
+            if (idx < 0) return@launch
+            val userIdx = conv.messages.subList(0, idx).indexOfLast { it.role == "user" }
+            if (userIdx < 0) return@launch
+            val prompt = conv.messages[userIdx]
+            store.upsert(conv.copy(messages = conv.messages.subList(0, userIdx), updatedAt = System.currentTimeMillis()))
+            sendMessage(prompt.content, prompt.attachments, feedback)
+        }
+    }
+
+    fun archiveConversation(id: String, archived: Boolean = true) {
+        viewModelScope.launch {
+            store.update(id) { it.copy(archived = archived) }
+            if (archived && _activeId.value == id) _activeId.value = null
+        }
+    }
+
+    /** Open a chat (e.g. from a wiki note's source link), even if archived. */
+    fun openConversation(id: String) { _activeId.value = id }
 
     fun saveNote(note: WikiNote, onSaved: (WikiNote) -> Unit = {}) {
         viewModelScope.launch {
@@ -491,7 +532,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             _exportRun.value = ExportRun(target.name, 0, ids.size)
             val bundle = withContext(Dispatchers.IO) { buildExportBundle(ids, options) }
             val result = runCatching {
-                target.export(bundle, cfg, ExportProgress { d, t, c -> _exportRun.value = ExportRun(target.name, d, t, c) })
+                target.export(bundle, cfg, ExportConfigStore.stateFor(getApplication(), targetId),
+                    ExportProgress { d, t, c -> _exportRun.value = ExportRun(target.name, d, t, c) })
             }.getOrElse { ExportResult(false, it.message ?: "Export failed") }
             _exportRun.value = ExportRun(target.name, ids.size, ids.size, result = result)
         }
@@ -529,6 +571,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearError() { _error.value = null }
+    fun showToast(msg: String) { _toast.value = msg }
     fun clearToast() { _toast.value = null }
 
     fun activeProvider(): ProviderConfig? =
@@ -639,7 +682,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun sendMessage(text: String, attachments: List<com.miniichat.data.Attachment> = emptyList()) {
+    fun sendMessage(
+        text: String,
+        attachments: List<com.miniichat.data.Attachment> = emptyList(),
+        /** Transient instruction for this request only (e.g. reviewer feedback after a rejection). */
+        extraInstruction: String? = null
+    ) {
         // Reject re-entrant sends while a stream is in flight (debounce double-tap)
         if (_isStreaming.value || streamingJob?.isActive == true) return
         val trimmed = text.trim()
@@ -724,6 +772,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         historyForApi.add(ChatMessage(msg.role, msg.content))
                     }
                 }
+            if (!extraInstruction.isNullOrBlank()) {
+                val i = historyForApi.indexOfLast { it.role == "user" }
+                if (i >= 0) {
+                    val m = historyForApi[i]
+                    val note = "\n\n[Revision request — the previous answer was rejected] " + extraInstruction.trim()
+                    historyForApi[i] = if (m.isMultipart()) {
+                        val parts = m.parts!!.toMutableList()
+                        val t = parts.indexOfFirst { it.type == "text" }
+                        if (t >= 0) parts[t] = parts[t].copy(text = (parts[t].text ?: "") + note)
+                        else parts.add(0, com.miniichat.api.ChatPart(type = "text", text = note.trim()))
+                        m.copy(content = m.content + note, parts = parts)
+                    } else m.copy(content = m.content + note)
+                }
+            }
 
             _isStreaming.value = true
             val builder = StringBuilder()
@@ -844,7 +906,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val lastUserIdx = msgs.indexOfLast { it.role == "user" }
             if (lastUserIdx < 0) return@launch
             val lastUser = msgs[lastUserIdx]
-            val trimmed = msgs.subList(0, lastUserIdx + 1)
+            // drop the user message too: sendMessage() appends it again (avoids duplicated prompts)
+            val trimmed = msgs.subList(0, lastUserIdx)
             store.upsert(conv.copy(messages = trimmed, updatedAt = System.currentTimeMillis()))
             sendMessage(lastUser.content, lastUser.attachments)
         }
@@ -860,7 +923,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (idx < 0) return@launch
             val target = msgs[idx]
             if (target.role != "user") return@launch
-            val trimmed = msgs.subList(0, idx + 1)
+            val trimmed = msgs.subList(0, idx)
             store.upsert(conv.copy(messages = trimmed, updatedAt = System.currentTimeMillis()))
             sendMessage(target.content, target.attachments)
         }

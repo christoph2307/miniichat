@@ -20,8 +20,9 @@ Built in:
 | --- | --- | --- |
 | Share ZIP / Save ZIP | ✅ | Obsidian-vault layout: `Folder/Note.md` + `assets/` (handled by the screen, needs Android SAF) |
 | Share Markdown | ✅ | selected notes concatenated, through the Android share sheet |
+| `nextcloud` | ✅ | **Login Flow v2** (browser login incl. 2FA/SSO → app password), WebDAV upload as Markdown files + `assets/` or a single ZIP; moved/renamed notes delete their old file; unchanged images are skipped |
+| `outline` | ✅ | API key; notes → documents in a collection (created if missing); virtual folders → nested parent documents; `[[links]]` → links to the Outline documents; images → attachments; re-export **updates** (remote ids kept in `files/export_state/outline.json`) |
 | `webhook` | ✅ | POST JSON to any URL (n8n, Zapier, Make, own service), Bearer token, batching, optional base64 assets |
-| `placeholder` | planned | shows how unfinished tools appear in the UI |
 
 ## Contract (`app/src/main/kotlin/com/miniichat/export/ExportApi.kt`)
 
@@ -34,14 +35,16 @@ interface ExportTarget {
     val capabilities: ExportCapabilities // assets? folders? preferred LinkStyle? maxBatch?
     val available: Boolean               // false → listed as "planned"
     suspend fun test(config: Map<String, String>): ExportResult
-    suspend fun export(bundle: ExportBundle, config: Map<String, String>, progress: ExportProgress): ExportResult
+    val login: InteractiveLogin?          // optional browser login (Nextcloud Login Flow v2)
+    suspend fun export(bundle: ExportBundle, config: Map<String, String>,
+                       state: ExportState, progress: ExportProgress): ExportResult
 }
 ```
 
 `ExportDocument` gives each target: `id, title, folder, tags, aliases, created, updated,
 relativePath, markdown (with frontmatter), body (without), linksTo, linkedFrom, assets`.
 
-`ConfigField` types are `TEXT`, `MULTILINE`, `URL`, `SECRET` (masked), `BOOLEAN`, `CHOICE`
+Configure targets in **Settings → Export targets**. `ConfigField` types are `TEXT`, `MULTILINE`, `URL`, `SECRET` (masked), `BOOLEAN`, `CHOICE`
 and `NUMBER`. Values are stored per target in an app-private DataStore (`ExportConfigStore`).
 
 `LinkStyle` options:
@@ -78,11 +81,11 @@ class MyToolTarget : ExportTarget {
 Then register it in `ExportRegistry.targets`. It appears automatically in **Send to…** and
 in **Settings → Wiki → Export targets**.
 
-**Planned work, once the tool list is known:**
-- Store a per-document remote id (e.g. as an `export.<target>.id` frontmatter key, which is
-  already preserved) so that a second export updates the remote page instead of creating a
-  duplicate.
-- Move secrets to EncryptedSharedPreferences or the Android Keystore.
+`ExportState` is a small persistent key/value store per target, kept in
+`files/export_state/<id>.json`. Targets keep remote ids there, so a second export updates the
+existing remote pages instead of creating duplicates. Configuration, including app passwords
+and API keys, is stored in **EncryptedSharedPreferences** (AES-256, key in the Android
+Keystore). In-app links (`miniichat://chat/…`) are reduced to their label on export.
 
 Candidates to choose from: Obsidian via Git or Syncthing folder, Nextcloud or WebDAV, Notion,
 Confluence, eLabFTW, OneNote (Graph API), Google Drive, Zotero notes, BookStack, Outline,

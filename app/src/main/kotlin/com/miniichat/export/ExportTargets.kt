@@ -79,7 +79,7 @@ class WebhookExportTarget : ExportTarget {
         }.getOrElse { ExportResult(false, it.message ?: "Request failed") }
     }
 
-    override suspend fun export(bundle: ExportBundle, config: Map<String, String>, progress: ExportProgress): ExportResult =
+    override suspend fun export(bundle: ExportBundle, config: Map<String, String>, state: ExportState, progress: ExportProgress): ExportResult =
         withContext(Dispatchers.IO) {
             val withAssets = config["include_assets"] == "true"
             val perNote = config["one_request_per_note"] == "true"
@@ -142,16 +142,16 @@ class PlannedExportTarget(
     override val capabilities: ExportCapabilities = ExportCapabilities()
 ) : ExportTarget {
     override val available = false
-    override suspend fun export(bundle: ExportBundle, config: Map<String, String>, progress: ExportProgress) =
+    override suspend fun export(bundle: ExportBundle, config: Map<String, String>, state: ExportState, progress: ExportProgress) =
         ExportResult(false, "$name export is not implemented yet")
 }
 
 object ExportRegistry {
     /** Local ZIP/share export is handled by the export screen itself (needs Android SAF). */
     val targets: List<ExportTarget> = listOf(
-        WebhookExportTarget(),
-        // ── to be implemented once the tool list is decided (see docs/EXPORT_API.md) ──
-        PlannedExportTarget("placeholder", "Your tool here", "Add an ExportTarget implementation and register it in ExportRegistry.")
+        NextcloudExportTarget(),
+        OutlineExportTarget(),
+        WebhookExportTarget()
     )
 
     fun byId(id: String) = targets.firstOrNull { it.id == id }
