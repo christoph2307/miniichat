@@ -341,7 +341,8 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val ctx = androidx.compose.ui.platform.LocalContext.current
                     val version = remember {
-                        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
+                        (runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?") +
+                            " (" + ctx.getString(R.string.build_sha) + ")"
                     }
                     Text("Version $version",
                         style = MaterialTheme.typography.bodyMedium,

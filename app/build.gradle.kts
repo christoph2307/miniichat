@@ -14,9 +14,11 @@ android {
         applicationId = "com.miniichat.lab"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "1.6.1-lab"
+        versionCode = 15
+        versionName = "1.6.2-lab"
         vectorDrawables { useSupportLibrary = true }
+        // commit of this build (CI) — written to the engine log to match crash backtraces with symbols
+        resValue("string", "build_sha", (System.getenv("GITHUB_SHA") ?: "local").take(7))
 
         externalNativeBuild {
             cmake {

@@ -27,6 +27,7 @@ object WhisperLib {
 
     @Volatile private var prefs: SharedPreferences? = null
     private var logFile: File? = null
+    private var buildInfo: String = ""
 
     /** Engine log of the run that crashed (kept until the next crash), or null. */
     var crashLogFile: File? = null
@@ -40,6 +41,9 @@ object WhisperLib {
     fun configure(context: Context) {
         if (prefs != null) return
         val app = context.applicationContext
+        buildInfo = runCatching {
+            app.packageManager.getPackageInfo(app.packageName, 0).versionName + " (" + app.getString(com.miniichat.R.string.build_sha) + ")"
+        }.getOrDefault("?")
         val p = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs = p
         val dir = File(app.filesDir, "engine").apply { mkdirs() }
@@ -120,7 +124,7 @@ object WhisperLib {
     private fun startLog() {
         runCatching {
             setLogFile(logFile?.absolutePath)
-            logLine("[app] ${java.time.Instant.now()} variant=$variant device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
+            logLine("[app] ${java.time.Instant.now()} build=$buildInfo variant=$variant device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}")
         }
     }
 
