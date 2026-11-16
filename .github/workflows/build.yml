@@ -52,6 +52,15 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
+      - name: Upload native debug symbols (for crash backtraces)
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-symbols
+          path: |
+            whisper-gpu/build/intermediates/cxx/**/obj/arm64-v8a/*.so
+            whisper-opt/build/intermediates/cxx/**/obj/arm64-v8a/*.so
+          if-no-files-found: warn
+
       # GitHub Release: only attach release APKs (v7 + v8 split), no debug.
       - name: Create release on tag
         if: startsWith(github.ref, 'refs/tags/v')

@@ -14,8 +14,8 @@ android {
         applicationId = "com.miniichat.lab"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.6.0-lab"
+        versionCode = 14
+        versionName = "1.6.1-lab"
         vectorDrawables { useSupportLibrary = true }
 
         externalNativeBuild {

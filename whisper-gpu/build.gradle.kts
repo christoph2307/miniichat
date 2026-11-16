@@ -20,7 +20,10 @@ android {
                     "-DWHISPER_JNI_OPENCL=ON",
                     "-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16"
                 )
-                cppFlags += listOf("-O3")
+                // -g: symbols for crash analysis (AGP strips them from the APK; the unstripped
+                // libs are uploaded by CI as artifact "native-symbols")
+                cppFlags += listOf("-O3", "-g")
+                cFlags += listOf("-g")
             }
         }
     }

@@ -5,6 +5,10 @@
 #include <cstring>
 #include <cstdio>
 #include <mutex>
+#include <csignal>
+#include <unistd.h>
+#include <dlfcn.h>
+#include <unwind.h>
 #include "whisper.h"
 #include "ggml-backend.h"
 
@@ -90,6 +94,65 @@ bool encoderBeginCb(struct whisper_context *, struct whisper_state *, void *user
     return !abortCb(user);
 }
 
+// ── native crash handler: write a backtrace (module + offset per frame) into the engine log,
+//    then hand the signal to the previous handler (Android's debuggerd → tombstone) ──
+int g_crash_fd = -1;
+struct sigaction g_old_actions[NSIG];
+
+void writeStr(const char *s) { if (g_crash_fd >= 0 && s) { ssize_t r = write(g_crash_fd, s, strlen(s)); (void) r; } }
+
+void writeHex(uintptr_t v) {
+    char buf[2 + 16 + 1]; buf[0] = '0'; buf[1] = 'x';
+    for (int i = 0; i < 16; ++i) { int d = (v >> ((15 - i) * 4)) & 0xF; buf[2 + i] = (char) (d < 10 ? '0' + d : 'a' + d - 10); }
+    buf[18] = 0; writeStr(buf);
+}
+
+struct BtState { int depth; };
+
+_Unwind_Reason_Code btFrame(struct _Unwind_Context *ctx, void *arg) {
+    auto *st = static_cast<BtState *>(arg);
+    uintptr_t pc = _Unwind_GetIP(ctx);
+    if (pc == 0) return _URC_END_OF_STACK;
+    Dl_info info{};
+    writeStr("  #"); char n[8]; snprintf(n, sizeof n, "%02d ", st->depth); writeStr(n);
+    writeStr("pc "); writeHex(pc);
+    if (dladdr(reinterpret_cast<void *>(pc), &info) && info.dli_fname) {
+        writeStr("  "); writeStr(info.dli_fname);
+        writeStr(" +"); writeHex(pc - reinterpret_cast<uintptr_t>(info.dli_fbase));
+        if (info.dli_sname) { writeStr(" ("); writeStr(info.dli_sname); writeStr(")"); }
+    }
+    writeStr("\n");
+    return ++st->depth >= 48 ? _URC_END_OF_STACK : _URC_NO_REASON;
+}
+
+void crashHandler(int sig, siginfo_t *info, void *uctx) {
+    writeStr("\n[crash] native signal "); char n[8]; snprintf(n, sizeof n, "%d", sig); writeStr(n);
+    writeStr(" fault addr "); writeHex(reinterpret_cast<uintptr_t>(info ? info->si_addr : nullptr));
+    writeStr("\n[crash] backtrace:\n");
+    BtState st{0};
+    _Unwind_Backtrace(btFrame, &st);
+    writeStr("[crash] end\n");
+    // chain to the previous handler so Android still records the crash
+    struct sigaction &old = g_old_actions[sig];
+    if (old.sa_flags & SA_SIGINFO) { if (old.sa_sigaction) { old.sa_sigaction(sig, info, uctx); return; } }
+    else if (old.sa_handler != SIG_DFL && old.sa_handler != SIG_IGN && old.sa_handler) { old.sa_handler(sig); return; }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void installCrashHandler() {
+    static bool installed = false;
+    if (installed) return;
+    installed = true;
+    for (int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT}) {
+        struct sigaction sa{};
+        sa.sa_sigaction = crashHandler;
+        sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        sigemptyset(&sa.sa_mask);
+        sigaction(sig, &sa, &g_old_actions[sig]);
+    }
+}
+
 } // namespace
 
 extern "C" {
@@ -119,6 +182,11 @@ Java_com_miniichat_whisper_WhisperLib_setLogFile(JNIEnv *env, jobject, jstring p
         const char *p = env->GetStringUTFChars(path, nullptr);
         g_log_file = fopen(p, "a");
         env->ReleaseStringUTFChars(path, p);
+        if (g_log_file) {
+            setvbuf(g_log_file, nullptr, _IONBF, 0);
+            g_crash_fd = fileno(g_log_file);
+            installCrashHandler();
+        }
     }
     whisper_log_set(engineLog, nullptr);
     ggml_log_set(engineLog, nullptr);
