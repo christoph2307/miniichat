@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <unwind.h>
+#include <vector>
 #include "whisper.h"
 #include "ggml-backend.h"
 
@@ -153,6 +154,31 @@ void installCrashHandler() {
     }
 }
 
+// ggml-opencl (v1.9.5) creates its backend context lazily in ggml_cl_init(), but whisper.cpp
+// allocates the model weights *before* any backend exists. The OpenCL buffer type's
+// get_alignment()/get_max_size() then dereference a NULL backend_ctx (SIGSEGV at 0x60,
+// reproduced on Adreno 740 / Galaxy S23). Initialising each GPU backend once up front
+// creates that context; the backends are kept for the lifetime of the process.
+std::vector<ggml_backend_t> g_gpu_warm;
+
+void warmUpGpuBackends() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    const size_t n = ggml_backend_dev_count();
+    for (size_t i = 0; i < n; ++i) {
+        ggml_backend_dev_t d = ggml_backend_dev_get(i);
+        const auto t = ggml_backend_dev_type(d);
+        if (t != GGML_BACKEND_DEVICE_TYPE_GPU && t != GGML_BACKEND_DEVICE_TYPE_IGPU) continue;
+        ggml_backend_t b = ggml_backend_dev_init(d, nullptr);
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        if (g_log_file) {
+            fprintf(g_log_file, "[jni] gpu backend warm-up %s: %s\n", b ? "ok" : "FAILED", ggml_backend_dev_description(d));
+        }
+        if (b) g_gpu_warm.push_back(b);
+    }
+}
+
 } // namespace
 
 extern "C" {
@@ -163,6 +189,7 @@ Java_com_miniichat_whisper_WhisperLib_initContext(JNIEnv *env, jobject, jstring 
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = useGpu == JNI_TRUE;
     cparams.flash_attn = flashAttn == JNI_TRUE;
+    if (cparams.use_gpu) warmUpGpuBackends();
     LOGI("init: model=%s use_gpu=%d flash_attn=%d", path, (int) cparams.use_gpu, (int) cparams.flash_attn);
     {
         std::lock_guard<std::mutex> lock(g_log_mutex);
