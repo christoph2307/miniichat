@@ -14,8 +14,8 @@ android {
         applicationId = "com.miniichat.lab"
         minSdk = 26
         targetSdk = 34
-        versionCode = 16
-        versionName = "1.6.3-lab"
+        versionCode = 17
+        versionName = "1.6.4-lab"
         vectorDrawables { useSupportLibrary = true }
         // commit of this build (CI) — written to the engine log to match crash backtraces with symbols
         resValue("string", "build_sha", (System.getenv("GITHUB_SHA") ?: "local").take(7))
@@ -160,7 +160,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.0.0")
     implementation(project(":whisper-opt"))
-    implementation(project(":whisper-gpu"))
+    // GPU (OpenCL) engine disabled — hangs the Adreno 740 during transcription (see WhisperLib.GPU_FEATURE_ENABLED)
+    // implementation(project(":whisper-gpu"))
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

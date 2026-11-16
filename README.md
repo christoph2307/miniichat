@@ -42,9 +42,11 @@
 
 **Engine builds** (picked automatically at start, see Settings → Speech recognition → Engine):
 baseline (any CPU) · ARMv8.2 dot-product/FP16 (most phones since 2019, much faster) ·
-**GPU (experimental)** — OpenCL with Qualcomm's Adreno kernels, enabled with "Use GPU" (+ app restart).
-On the GPU use **q8_0** or full-precision models; q5_0 matrix multiplications fall back to the CPU.
-If the GPU driver crashes, GPU mode is switched off automatically on the next start.
+**GPU: currently disabled.** An OpenCL build (Qualcomm Adreno kernels) exists in `:whisper-gpu`.
+On a Galaxy S23 it first crashed while loading the model, because ggml-opencl's backend context
+didn't exist yet (fixed by initialising the backend first). After that fix the encoder hung the
+GPU until the phone was rebooted. The module and code stay in place behind
+`WhisperLib.GPU_FEATURE_ENABLED`. Speech recognition runs on the CPU.
 
 | Model | Size | Notes |
 | --- | --- | --- |
@@ -53,7 +55,7 @@ If the GPU driver crashes, GPU mode is switched off automatically on the next st
 | small-q5_1 | 181 MB | recommended for German / technical speech |
 | large-v3-turbo-q5_0 | 547 MB | best quality; needs a recent phone |
 | **large-v3-turbo-german-q5_0** | 547 MB | German fine-tune (primeline), CPU — built by `.github/workflows/german-model.yml` |
-| **large-v3-turbo-german-q8_0** | 834 MB | German fine-tune for **GPU** mode |
+| large-v3-turbo-german-q8_0 | 834 MB | German fine-tune, higher precision (slower on CPU) |
 
 Native code: `app/src/main/cpp/` (CMake fetches whisper.cpp `v1.9.5` at build time — the build needs internet and git).
 Kotlin: `audio/` (recorder, service, decoder, WAV I/O), `whisper/` (JNI, models, downloader, chunked transcriber),

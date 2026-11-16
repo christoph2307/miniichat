@@ -332,26 +332,32 @@ fun SpeechSettingsScreen(
                         Text(stringResource(R.string.speech_gpu_none), style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error)
                     }
-                    ToggleRow(
-                        title = stringResource(R.string.speech_gpu),
-                        subtitle = if (v82) stringResource(R.string.speech_gpu_hint) else stringResource(R.string.speech_gpu_unsupported),
-                        checked = gpuWanted
-                    ) { v -> if (v82) { gpuWanted = v; WhisperLib.gpuRequested = v } }
-                    if (gpuWanted) {
-                        var fa by remember { mutableStateOf(WhisperLib.gpuFlashAttention) }
+                    if (WhisperLib.GPU_FEATURE_ENABLED) {
                         ToggleRow(
-                            title = stringResource(R.string.speech_gpu_fa),
-                            subtitle = stringResource(R.string.speech_gpu_fa_hint),
-                            checked = fa
-                        ) { v -> fa = v; WhisperLib.gpuFlashAttention = v }
-                    }
-                    if (gpuWanted != WhisperLib.gpuBuildLoaded && v82) {
-                        TextButton(onClick = {
-                            val i = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
-                                ?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            if (i != null) ctx.startActivity(i)
-                            Runtime.getRuntime().exit(0)
-                        }) { Text(stringResource(R.string.speech_restart)) }
+                            title = stringResource(R.string.speech_gpu),
+                            subtitle = if (v82) stringResource(R.string.speech_gpu_hint) else stringResource(R.string.speech_gpu_unsupported),
+                            checked = gpuWanted
+                        ) { v -> if (v82) { gpuWanted = v; WhisperLib.gpuRequested = v } }
+                        if (gpuWanted) {
+                            var fa by remember { mutableStateOf(WhisperLib.gpuFlashAttention) }
+                            ToggleRow(
+                                title = stringResource(R.string.speech_gpu_fa),
+                                subtitle = stringResource(R.string.speech_gpu_fa_hint),
+                                checked = fa
+                            ) { v -> fa = v; WhisperLib.gpuFlashAttention = v }
+                        }
+                        if (gpuWanted != WhisperLib.gpuBuildLoaded && v82) {
+                            TextButton(onClick = {
+                                val i = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+                                    ?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                if (i != null) ctx.startActivity(i)
+                                Runtime.getRuntime().exit(0)
+                            }) { Text(stringResource(R.string.speech_restart)) }
+                        }
+                    } else {
+                        Spacer(Modifier.height(6.dp))
+                        Text(stringResource(R.string.speech_gpu_disabled), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     WhisperLib.lastRunSummary?.let {
                         Spacer(Modifier.height(8.dp))

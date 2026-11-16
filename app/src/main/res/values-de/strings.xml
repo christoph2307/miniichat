@@ -124,4 +124,5 @@
     <string name="speech_share_log">Engine-Protokoll teilen</string>
     <string name="speech_gpu_fa">Flash Attention auf der GPU</string>
     <string name="speech_gpu_fa_hint">Schneller, aber häufige Ursache für GPU-Treiberabstürze. Standardmäßig aus.</string>
+    <string name="speech_gpu_disabled">GPU-Beschleunigung ist deaktiviert: Auf dem Galaxy S23 (Adreno 740) hat die OpenCL-Engine das Telefon während der Transkription eingefroren. Die Spracherkennung läuft auf der CPU (schneller ARMv8.2-Build).</string>
 </resources>

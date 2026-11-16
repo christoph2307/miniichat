@@ -21,6 +21,15 @@ interface WhisperListener {
  * Changing the GPU setting therefore needs an app restart.
  */
 object WhisperLib {
+    /**
+     * GPU (OpenCL) transcription is switched off: on a Galaxy S23 (Adreno 740) the model loads
+     * after the backend fix, but the first encoder run hangs the GPU so hard that the phone
+     * must be rebooted. The :whisper-gpu module and all code paths stay in the repo; set this
+     * to true AND add `implementation(project(":whisper-gpu"))` back to app/build.gradle.kts
+     * to experiment again.
+     */
+    const val GPU_FEATURE_ENABLED = false
+
     private const val PREFS = "whisper_engine"
     private const val KEY_GPU = "gpu"
     private const val KEY_GPU_PENDING = "gpu_pending"
@@ -49,6 +58,13 @@ object WhisperLib {
         val dir = File(app.filesDir, "engine").apply { mkdirs() }
         val log = File(dir, "engine.log")
         val crash = File(dir, "engine-crash.log")
+        if (!GPU_FEATURE_ENABLED) {
+            // feature off: forget any earlier GPU choice / pending marker, no crash banner
+            if (p.getBoolean(KEY_GPU, false) || p.getBoolean(KEY_GPU_PENDING, false)) {
+                p.edit().putBoolean(KEY_GPU, false).putBoolean(KEY_GPU_PENDING, false).commit()
+            }
+            File(dir, "engine-crash.log").delete()
+        }
         if (p.getBoolean(KEY_GPU_PENDING, false)) {
             // the process died while the GPU backend was initialising/running → disable it
             p.edit().putBoolean(KEY_GPU, false).putBoolean(KEY_GPU_PENDING, false).commit()
@@ -103,7 +119,7 @@ object WhisperLib {
 
     private fun load(): Throwable? {
         val v82 = cpuSupportsV82()
-        if (v82 && gpuRequested && tryLoad("whisper_jni_gpu")) {
+        if (GPU_FEATURE_ENABLED && v82 && gpuRequested && tryLoad("whisper_jni_gpu")) {
             variant = "GPU (OpenCL) + armv8.2"
             gpuBuildLoaded = true
             startLog()
