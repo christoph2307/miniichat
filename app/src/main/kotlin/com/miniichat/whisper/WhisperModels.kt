@@ -24,13 +24,13 @@ object WhisperModels {
 
     val catalog: List<WhisperModel> = listOf(
         WhisperModel("large-v3-turbo-german-q5_0", "Large v3 Turbo · Deutsch (quantized)", 547,
-            note = "German fine-tune (primeline) — recommended for German",
+            note = "Recommended for German: digits, units, punctuation; use with fast mode for short clips",
             customUrl = "$GERMAN_RELEASE/ggml-large-v3-turbo-german-q5_0.bin"),
         WhisperModel("medium-german-q5_0", "Medium · Deutsch (quantized)", 539,
-            note = "German fine-tune (Common Voice), encoder ≈2× faster than Large v3 Turbo",
+            note = "≈1.5× faster than Large v3 Turbo, but less accurate: spells out numbers (\"vier Komma zwei\"), misheard words in tests",
             customUrl = "$GERMAN_RELEASE/ggml-medium-german-q5_0.bin"),
         WhisperModel("medium-german-q8_0", "Medium · Deutsch (q8_0)", 823,
-            note = "German fine-tune, higher precision",
+            note = "German Medium fine-tune, higher precision (same caveats as q5_0)",
             customUrl = "$GERMAN_RELEASE/ggml-medium-german-q8_0.bin"),
         WhisperModel("large-v3-turbo-german-q8_0", "Large v3 Turbo · Deutsch (q8_0)", 834,
             note = "German fine-tune, higher precision — slower than q5_0 on the CPU",

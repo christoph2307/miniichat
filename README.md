@@ -58,7 +58,7 @@ GPU until the phone was rebooted. The module and code stay in place behind
 | large-v3-turbo-q5_0 | 547 MB | best quality; needs a recent phone |
 | **large-v3-turbo-german-q5_0** | 547 MB | German fine-tune (primeline), CPU — built by `.github/workflows/german-model.yml` |
 | large-v3-turbo-german-q8_0 | 834 MB | German fine-tune, higher precision (slower on CPU) |
-| **medium-german-q5_0** | ~540 MB | German Medium fine-tune ([bofenghuang/whisper-medium-cv11-german](https://huggingface.co/bofenghuang/whisper-medium-cv11-german), Apache-2.0), encoder ≈2× faster than turbo — built by `.github/workflows/german-medium-model.yml` |
+| **medium-german-q5_0** | ~540 MB | German Medium fine-tune ([bofenghuang/whisper-medium-cv11-german](https://huggingface.co/bofenghuang/whisper-medium-cv11-german), Apache-2.0), ≈1.5× faster than turbo but less accurate (spells out numbers, misheard words on synthetic German test speech): turbo + fast mode is preferred. Built by `.github/workflows/german-medium-model.yml` |
 
 Native code: `app/src/main/cpp/` (CMake fetches whisper.cpp `v1.9.5` at build time — the build needs internet and git).
 Kotlin: `audio/` (recorder, service, decoder, WAV I/O), `whisper/` (JNI, models, downloader, chunked transcriber),
