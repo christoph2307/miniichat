@@ -40,6 +40,8 @@
 4. In the chat: tap 🎤, describe the experiment, tap **Done** → transcript appears. `+` → *Take photo* of the setup.
    Send. Edit/regenerate as needed; everything stays in local chat history.
 
+**Fast mode for short recordings** (default on): clips up to ~18 s are encoded with a window fitted to their length instead of the full 30 s. For a 6-s German dictation the encoder was 3.8× faster with identical text.
+
 **Engine builds** (picked automatically at start, see Settings → Speech recognition → Engine):
 baseline (any CPU) · ARMv8.2 dot-product/FP16 (most phones since 2019, much faster) ·
 **GPU: currently disabled.** An OpenCL build (Qualcomm Adreno kernels) exists in `:whisper-gpu`.
@@ -56,6 +58,7 @@ GPU until the phone was rebooted. The module and code stay in place behind
 | large-v3-turbo-q5_0 | 547 MB | best quality; needs a recent phone |
 | **large-v3-turbo-german-q5_0** | 547 MB | German fine-tune (primeline), CPU — built by `.github/workflows/german-model.yml` |
 | large-v3-turbo-german-q8_0 | 834 MB | German fine-tune, higher precision (slower on CPU) |
+| **medium-german-q5_0** | ~540 MB | German Medium fine-tune ([bofenghuang/whisper-medium-cv11-german](https://huggingface.co/bofenghuang/whisper-medium-cv11-german), Apache-2.0), encoder ≈2× faster than turbo — built by `.github/workflows/german-medium-model.yml` |
 
 Native code: `app/src/main/cpp/` (CMake fetches whisper.cpp `v1.9.5` at build time — the build needs internet and git).
 Kotlin: `audio/` (recorder, service, decoder, WAV I/O), `whisper/` (JNI, models, downloader, chunked transcriber),

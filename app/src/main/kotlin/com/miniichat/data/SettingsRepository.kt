@@ -38,7 +38,8 @@ data class AppSettings(
     val wikiDefaultFolder: String = "Inbox",
     val wikiSaveImages: Boolean = true,       // copy photos of the prompt into the note
     val wikiSaveTranscript: Boolean = false,  // keep the raw transcript as a collapsed callout
-    val wikiSaveAudio: Boolean = true         // copy recordings into the note (## Recordings, playable)
+    val wikiSaveAudio: Boolean = true,        // copy recordings into the note (## Recordings, playable)
+    val whisperFastShort: Boolean = true      // shorter encoder window for short recordings
 )
 
 class SettingsRepository(private val context: Context) {
@@ -65,6 +66,7 @@ class SettingsRepository(private val context: Context) {
         val WIKI_IMAGES = booleanPreferencesKey("wiki_save_images")
         val WIKI_TRANSCRIPT = booleanPreferencesKey("wiki_save_transcript")
         val WIKI_AUDIO = booleanPreferencesKey("wiki_save_audio")
+        val W_FAST_SHORT = booleanPreferencesKey("whisper_fast_short")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p -> read(p) }
@@ -91,7 +93,8 @@ class SettingsRepository(private val context: Context) {
         wikiDefaultFolder = p[Keys.WIKI_FOLDER] ?: "Inbox",
         wikiSaveImages = p[Keys.WIKI_IMAGES] ?: true,
         wikiSaveTranscript = p[Keys.WIKI_TRANSCRIPT] ?: false,
-        wikiSaveAudio = p[Keys.WIKI_AUDIO] ?: true
+        wikiSaveAudio = p[Keys.WIKI_AUDIO] ?: true,
+        whisperFastShort = p[Keys.W_FAST_SHORT] ?: true
     )
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {
@@ -119,6 +122,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.WIKI_IMAGES] = next.wikiSaveImages
             p[Keys.WIKI_TRANSCRIPT] = next.wikiSaveTranscript
             p[Keys.WIKI_AUDIO] = next.wikiSaveAudio
+            p[Keys.W_FAST_SHORT] = next.whisperFastShort
         }
     }
 }

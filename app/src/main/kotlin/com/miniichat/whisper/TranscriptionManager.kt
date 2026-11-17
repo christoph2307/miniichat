@@ -175,6 +175,7 @@ object TranscriptionManager {
         if (!wav.exists()) throw IllegalStateException("Recording file not found: ${wav.name}")
 
         _state.value = TranscriptionUi(a.uri, a.name, phase = "loading", queued = queuedCount() - 1)
+        WhisperLib.isAvailable // load the native library first so the log shows the real engine
         WhisperLib.log("[app] transcribe ${a.name} (${a.durationMs} ms) model=${model.name} threads=" +
             (if (s.whisperThreads > 0) "${s.whisperThreads}" else "auto(${Transcriber.defaultThreads()})") +
             " engine=${WhisperLib.variant} ${Transcriber.cpuLayout()}")
@@ -186,7 +187,8 @@ object TranscriptionManager {
                 language = s.whisperLanguage,
                 threads = s.whisperThreads,
                 translate = s.whisperTranslate,
-                initialPrompt = s.whisperPrompt
+                initialPrompt = s.whisperPrompt,
+                fastShortAudio = s.whisperFastShort
             ),
             onProgress = { p -> _state.value = _state.value?.copy(progress = p, phase = "transcribing", queued = queuedCount() - 1) },
             onPartial = { t -> _state.value = _state.value?.copy(partial = t, phase = "transcribing", queued = queuedCount() - 1) }

@@ -273,6 +273,11 @@ fun SpeechSettingsScreen(
                         checked = settings.autoTranscribe
                     ) { v -> onChange { it.copy(autoTranscribe = v) } }
                     ToggleRow(
+                        title = stringResource(R.string.speech_fast_short),
+                        subtitle = stringResource(R.string.speech_fast_short_hint),
+                        checked = settings.whisperFastShort
+                    ) { v -> onChange { it.copy(whisperFastShort = v) } }
+                    ToggleRow(
                         title = stringResource(R.string.speech_translate),
                         subtitle = stringResource(R.string.speech_translate_hint),
                         checked = settings.whisperTranslate

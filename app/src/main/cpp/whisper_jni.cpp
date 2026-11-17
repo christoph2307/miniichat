@@ -244,7 +244,7 @@ JNIEXPORT jstring JNICALL
 Java_com_miniichat_whisper_WhisperLib_transcribe(
         JNIEnv *env, jobject,
         jlong ptr, jfloatArray samples, jstring language, jint threads,
-        jboolean translate, jstring initialPrompt, jobject listener) {
+        jboolean translate, jstring initialPrompt, jobject listener, jint audioCtx) {
     auto *ctx = reinterpret_cast<whisper_context *>(ptr);
     if (!ctx) return toJString(env, "");
 
@@ -265,6 +265,8 @@ Java_com_miniichat_whisper_WhisperLib_transcribe(
     params.no_context       = true;
     params.single_segment   = false;
     params.suppress_blank   = true;
+    // >0: shorter encoder window for short audio (encoder cost scales ~linearly with it)
+    params.audio_ctx        = audioCtx > 0 ? audioCtx : 0;
     if (prompt && strlen(prompt) > 0) params.initial_prompt = prompt;
 
     CallbackCtx cb{};
@@ -293,7 +295,7 @@ Java_com_miniichat_whisper_WhisperLib_transcribe(
     whisper_reset_timings(ctx);
     {
         std::lock_guard<std::mutex> lock(g_log_mutex);
-        if (g_log_file) { fprintf(g_log_file, "[jni] whisper_full: %d samples (%.1f s), threads=%d, lang=%s\n", (int) n, n / 16000.0, params.n_threads, params.language); }
+        if (g_log_file) { fprintf(g_log_file, "[jni] whisper_full: %d samples (%.1f s), threads=%d, lang=%s, audio_ctx=%d\n", (int) n, n / 16000.0, params.n_threads, params.language, params.audio_ctx); }
     }
     int rc = whisper_full(ctx, params, data, n);
     whisper_print_timings(ctx);  // encode / decode / fallbacks → engine log

@@ -12,7 +12,9 @@ data class TranscribeOptions(
     val language: String = "auto",
     val threads: Int = 0,
     val translate: Boolean = false,
-    val initialPrompt: String = ""
+    val initialPrompt: String = "",
+    /** Shorter encoder window for short audio (≈3–5× faster for clips under ~18 s). */
+    val fastShortAudio: Boolean = true
 )
 
 /**
@@ -23,6 +25,8 @@ class Transcriber {
     private val mutex = Mutex()
     private var ctxPtr = 0L
     private var loadedPath: String? = null
+    /** Encoder window of the previous run (1500 = full 30 s). */
+    private var lastAudioCtx = 1500
 
     private suspend fun ensureLoaded(modelFile: File) {
         if (ctxPtr != 0L && loadedPath == modelFile.absolutePath) return
@@ -46,6 +50,7 @@ class Transcriber {
         if (ctxPtr != 0L) WhisperLib.freeContext(ctxPtr)
         ctxPtr = 0L
         loadedPath = null
+        lastAudioCtx = 1500
     }
 
     fun abort() { if (WhisperLib.isAvailable) WhisperLib.requestAbort() }
@@ -117,8 +122,19 @@ class Transcriber {
                     if (opts.initialPrompt.isNotBlank()) append(opts.initialPrompt.trim()).append(' ')
                     append(prefix.takeLast(200))
                 }.trim().ifBlank { null }
+                val audioCtx = if (opts.fastShortAudio) audioCtxFor(chunk.size) else 0
+                val effective = if (audioCtx > 0) audioCtx else 1500
+                // whisper.cpp v1.9.5 reuses the encoder state of the previous run: going from a larger to
+                // a smaller window on the same context produces garbage (reproduced: full → 448 gave ","),
+                // smaller → larger and equal sizes are fine. Reload the model in that case (~1 s).
+                if (effective < lastAudioCtx) {
+                    WhisperLib.log("[app] encoder window $lastAudioCtx → $effective: reloading model")
+                    release()
+                    ensureLoaded(modelFile)
+                }
+                lastAudioCtx = effective
                 val text = WhisperLib.guardGpu(WhisperLib.gpuBuildLoaded) {
-                    WhisperLib.transcribe(ctxPtr, chunk, opts.language, threads, opts.translate, prompt, listener)
+                    WhisperLib.transcribe(ctxPtr, chunk, opts.language, threads, opts.translate, prompt, listener, audioCtx)
                 }
                 ensureActive()
                 if (text.isNotBlank()) {
@@ -157,6 +173,19 @@ class Transcriber {
          * threads per layer, so one slow efficiency core holds back the fast ones
          * (Galaxy S23: 1×X3 + 2×A715 + 2×A710 + 3×A510 → 5 threads).
          */
+        /**
+         * Encoder window for a single short chunk: 50 frames per second of audio + ~2.5 s margin,
+         * rounded up to 64. Only used when it saves a lot (≤ 1024 of 1500 frames, i.e. ≲ 18 s);
+         * measured on German dictation: identical text for a 6-s clip, encoder 3.8× faster.
+         * 0 = full 30-s window.
+         */
+        fun audioCtxFor(samples: Int): Int {
+            val seconds = samples / WavIO.SAMPLE_RATE.toDouble()
+            if (seconds > 30.0) return 0
+            val ctx = (Math.ceil((seconds * 50 + 128) / 64.0) * 64).toInt()
+            return if (ctx <= 1024) ctx else 0
+        }
+
         fun defaultThreads(): Int {
             val cores = Runtime.getRuntime().availableProcessors()
             val freqs = (0 until cores).mapNotNull { i ->

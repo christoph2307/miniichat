@@ -131,4 +131,6 @@
     <string name="speech_bench">Geschwindigkeit messen (≈1–3 min)</string>
     <string name="speech_bench_line">%1$d Threads: %2$.1f s pro 30-s-Fenster → %3$.1f× Echtzeit (Encoder)</string>
     <string name="speech_bench_applied">Schnellste Einstellung übernommen: %1$d Threads</string>
+    <string name="speech_fast_short">Schnellmodus für kurze Aufnahmen</string>
+    <string name="speech_fast_short_hint">Kodiert nur die gesprochene Länge statt eines vollen 30-s-Fensters: 3–5× schneller bei Aufnahmen unter ~18 s, im Test gleicher Text.</string>
 </resources>

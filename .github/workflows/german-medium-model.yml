@@ -1,0 +1,85 @@
+name: Build German Whisper Medium model
+
+# Converts bofenghuang/whisper-medium-cv11-german (Apache-2.0; whisper-medium fine-tuned on
+# Common Voice 11 German, WER 7.05 vs 8.5 for the base model) from Hugging Face format to ggml,
+# quantizes it to q5_0 and q8_0, smoke-tests it on German speech and publishes it to the
+# "whisper-models" release that the app downloads from.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/german-medium-model.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    env:
+      WHISPER_CPP_TAG: v1.9.5
+      HF_REPO: bofenghuang/whisper-medium-cv11-german
+      NAME: ggml-medium-german
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install converter dependencies (CPU torch)
+        run: |
+          pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+          pip install --quiet "transformers<5" safetensors huggingface_hub numpy
+          sudo apt-get install -y -q espeak-ng > /dev/null
+
+      - name: Build whisper.cpp tools
+        run: |
+          git clone --depth 1 -b "$WHISPER_CPP_TAG" https://github.com/ggml-org/whisper.cpp
+          git clone --depth 1 https://github.com/openai/whisper openai-whisper
+          cmake -S whisper.cpp -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+          cmake --build build --target whisper-quantize whisper-cli -j "$(nproc)"
+
+      - name: Download Hugging Face checkpoint
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download, list_repo_files
+          repo = os.environ["HF_REPO"]
+          files = list_repo_files(repo)
+          print("\n".join(files))
+          weights = ["model.safetensors"] if "model.safetensors" in files else ["pytorch_model.bin"]
+          snapshot_download(repo, local_dir="hf-model", allow_patterns=["*.json", "*.txt"] + weights)
+          PY
+          [ -f hf-model/added_tokens.json ] || echo '{}' > hf-model/added_tokens.json
+          ls -la hf-model
+
+      - name: Convert to ggml (f16)
+        run: |
+          mkdir -p out
+          python whisper.cpp/models/convert-h5-to-ggml.py hf-model openai-whisper out
+          mv out/ggml-model.bin "$NAME-f16.bin"
+          ls -la "$NAME-f16.bin"
+
+      - name: Quantize (q5_0, q8_0)
+        run: |
+          for q in q5_0 q8_0; do ./build/bin/whisper-quantize "$NAME-f16.bin" "$NAME-$q.bin" "$q"; done
+          ls -la $NAME-q*.bin
+          sha256sum $NAME-q*.bin | tee SHA256SUMS-medium
+
+      - name: Smoke test on German speech
+        run: |
+          espeak-ng -v de -s 150 -w de.wav "Probe drei wurde bei zweihundertfünfzig Grad Celsius für dreißig Minuten getempert. Die Leistung betrug vier Komma zwei Milliwatt."
+          for q in q5_0 q8_0; do
+            ./build/bin/whisper-cli -m "$NAME-$q.bin" -f de.wav -l de -t "$(nproc)" -otxt -of "smoke-$q" 2>&1 | grep -E "encode time|total time"
+            echo "--- $q transcript ---"; cat "smoke-$q.txt"
+            test -s "smoke-$q.txt"
+          done
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: whisper-models
+          files: |
+            ggml-medium-german-q5_0.bin
+            ggml-medium-german-q8_0.bin
+            SHA256SUMS-medium
+          make_latest: false
