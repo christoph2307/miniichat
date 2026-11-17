@@ -221,4 +221,6 @@
     <string name="speech_gpu_fa">Flash attention on GPU</string>
     <string name="speech_gpu_fa_hint">Faster, but a common cause of GPU driver crashes. Off by default.</string>
     <string name="speech_gpu_disabled">GPU acceleration is switched off: on the Galaxy S23 (Adreno 740) the OpenCL engine froze the phone during transcription. Speech recognition runs on the CPU (fast ARMv8.2 build).</string>
+    <string name="tx_channel">Transcription</string>
+    <string name="tx_notification_title">Transcribing recordings…</string>
 </resources>

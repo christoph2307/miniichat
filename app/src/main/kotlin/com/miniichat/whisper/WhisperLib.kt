@@ -183,6 +183,9 @@ object WhisperLib {
         set(v) { prefs?.edit()?.putString("last_run", v)?.apply() }
 
     external fun initContext(modelPath: String, useGpu: Boolean, flashAttn: Boolean): Long
+    /** Append a line to the engine log (loads the library if needed; never throws). */
+    fun log(line: String) { if (isAvailable) runCatching { logLine(line) } }
+
     external fun setLogFile(path: String?)
     external fun logLine(line: String)
     external fun freeContext(ptr: Long)

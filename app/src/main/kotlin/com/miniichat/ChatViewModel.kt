@@ -118,37 +118,39 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- Dictaphone + local speech recognition ----------------
 
     val modelManager = WhisperModelManager(app)
-    private val transcriber = Transcriber()
-
-    private val _transcription = MutableStateFlow<TranscriptionUi?>(null)
-    val transcription: StateFlow<TranscriptionUi?> = _transcription.asStateFlow()
-
-    // ── drafts: unsent text + attachments per chat, persisted ──
-    private val draftStore = com.miniichat.data.DraftStore(app)
-    private val _drafts = MutableStateFlow(draftStore.loadAll())
-    private var draftSaveJob: Job? = null
 
     init {
+        // app-wide services (survive this ViewModel; transcription runs as a foreground service)
+        com.miniichat.data.DraftRepository.init(app)
+        com.miniichat.whisper.TranscriptionManager.init(app)
+        viewModelScope.launch {
+            com.miniichat.whisper.TranscriptionManager.events.collect { e ->
+                when (e) {
+                    is com.miniichat.whisper.TranscriptionManager.Event.Toast -> _toast.value = e.text
+                    is com.miniichat.whisper.TranscriptionManager.Event.Error -> _error.value = e.text
+                }
+            }
+        }
+    }
+
+    val transcription: StateFlow<TranscriptionUi?> = com.miniichat.whisper.TranscriptionManager.state
+
+    // ── drafts: unsent text + attachments per chat (DraftRepository, persisted) ──
+    init {
         // reopen the chat that was open before the app was killed (standby, low memory, …)
-        draftStore.lastActiveId?.let { if (_activeId.value == null) _activeId.value = it }
-        viewModelScope.launch { _activeId.collect { draftStore.lastActiveId = it } }
+        com.miniichat.data.DraftRepository.lastActiveId?.let { if (_activeId.value == null) _activeId.value = it }
+        viewModelScope.launch { _activeId.collect { com.miniichat.data.DraftRepository.setLastActiveId(it) } }
     }
 
     fun draftKey(id: String? = _activeId.value): String = id ?: com.miniichat.data.DraftStore.NEW_CHAT
 
-    val draft: StateFlow<com.miniichat.data.Draft> = kotlinx.coroutines.flow.combine(_activeId, _drafts) { id, m ->
-        m[draftKey(id)] ?: com.miniichat.data.Draft()
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, _drafts.value[draftKey()] ?: com.miniichat.data.Draft())
+    val draft: StateFlow<com.miniichat.data.Draft> =
+        kotlinx.coroutines.flow.combine(_activeId, com.miniichat.data.DraftRepository.drafts) { id, m ->
+            m[draftKey(id)] ?: com.miniichat.data.Draft()
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, com.miniichat.data.DraftRepository.get(draftKey()))
 
-    private fun updateDraft(key: String = draftKey(), transform: (com.miniichat.data.Draft) -> com.miniichat.data.Draft) {
-        val cur = _drafts.value
-        _drafts.value = cur + (key to transform(cur[key] ?: com.miniichat.data.Draft()))
-        draftSaveJob?.cancel()
-        draftSaveJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(300)
-            draftStore.saveAll(_drafts.value)
-        }
-    }
+    private fun updateDraft(key: String = draftKey(), transform: (com.miniichat.data.Draft) -> com.miniichat.data.Draft) =
+        com.miniichat.data.DraftRepository.update(key, transform)
 
     fun setDraftText(text: String) = updateDraft { it.copy(text = text) }
     fun setDraftAttachments(list: List<Attachment>) = updateDraft { it.copy(attachments = list) }
@@ -156,16 +158,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Send the current draft and clear it. */
     fun sendDraft() {
         val key = draftKey()
-        val d = _drafts.value[key] ?: return
+        val d = com.miniichat.data.DraftRepository.get(key)
         if (d.isEmpty) return
         if (_isStreaming.value) return
-        _drafts.value = _drafts.value - key
-        draftStore.saveAll(_drafts.value)
+        com.miniichat.data.DraftRepository.remove(key)
         sendMessage(d.text, d.attachments)
     }
 
     /** Persist immediately (called when the app goes to background). */
-    fun flushDrafts() { draftSaveJob?.cancel(); draftStore.saveAll(_drafts.value) }
+    fun flushDrafts() = com.miniichat.data.DraftRepository.flush()
 
     fun recordingToAttachment(rec: FinishedRecording): Attachment = Attachment(
         type = "audio",
@@ -176,145 +177,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         durationMs = rec.durationMs
     )
 
-    private fun activeModelFile(): File? {
-        val name = settings.value.whisperModel
-        if (name.isBlank()) return null
-        val f = modelManager.fileFor(name)
-        return if (f.exists()) f else null
-    }
+    fun hasSpeechModel(): Boolean = com.miniichat.whisper.TranscriptionManager.hasModel(settings.value.whisperModel)
 
-    fun hasSpeechModel(): Boolean = activeModelFile() != null
-
-    // ── transcription queue: several recordings are processed one after another ──
-    private data class TxJob(val draftKey: String, val att: Attachment?, val importUri: android.net.Uri? = null)
-    private val txQueue = ArrayDeque<TxJob>()
-    private var txWorker: Job? = null
-
-    private fun enqueue(job: TxJob) {
-        txQueue.addLast(job)
-        _transcription.value = _transcription.value?.copy(queued = txQueue.size)
-        if (txWorker?.isActive != true) {
-            txWorker = viewModelScope.launch {
-                while (true) {
-                    val j = txQueue.removeFirstOrNull() ?: break
-                    runJob(j)
-                }
-                _transcription.value = null
-            }
-        }
-    }
-
-    /** Transcribe an audio attachment (16 kHz WAV) with the selected local whisper model. */
+    /** Queue an audio attachment for transcription (runs in the background service). */
     fun transcribe(att: Attachment, key: String = draftKey()) {
-        if (activeModelFile() == null) {
+        if (!hasSpeechModel()) {
             _error.value = "No speech model installed. Open Settings → Speech recognition and download a Whisper model."
             return
         }
-        if (txQueue.any { it.att?.uri == att.uri } || _transcription.value?.attachmentUri == att.uri) return
-        enqueue(TxJob(key, att))
+        com.miniichat.whisper.TranscriptionManager.enqueueTranscription(att, key)
     }
 
-    private suspend fun runJob(job: TxJob) {
-        val app = getApplication<Application>()
-        var att = job.att
-        // 1) imported file → decode to 16 kHz WAV first
-        if (job.importUri != null) {
-            val (name, _) = com.miniichat.util.AttachmentLoader.queryNameSize(app.contentResolver, job.importUri)
-            _transcription.value = TranscriptionUi(job.importUri.toString(), name, phase = "decoding", queued = txQueue.size)
-            try {
-                val stem = name.substringBeforeLast('.').replace(Regex("[^A-Za-z0-9._-]"), "_").take(40)
-                val out = File(DictaphoneRecorder.recordingsDir(app), "import_${System.currentTimeMillis()}_$stem.wav")
-                val durationMs = withContext(Dispatchers.IO) {
-                    AudioDecoder.decodeToWav(app, job.importUri, out) { p ->
-                        _transcription.value = _transcription.value?.copy(progress = p)
-                    }
-                }
-                att = recordingToAttachment(FinishedRecording(out, durationMs, out.length())).copy(name = name)
-                val a = att
-                updateDraft(job.draftKey) { it.copy(attachments = it.attachments + a) }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _error.value = "Could not import audio: ${e.message}"
-                return
-            }
-            if (!(settings.value.autoTranscribe && hasSpeechModel())) return
-        }
-        val a = att ?: return
-        val model = activeModelFile() ?: return
-        val wav = File(android.net.Uri.parse(a.uri).path ?: return)
-        val s = settings.value
-        _transcription.value = TranscriptionUi(a.uri, a.name, phase = "loading", queued = txQueue.size)
-        val started = android.os.SystemClock.elapsedRealtime()
-        try {
-            val text = transcriber.transcribeWav(
-                modelFile = model,
-                wav = wav,
-                opts = TranscribeOptions(
-                    language = s.whisperLanguage,
-                    threads = s.whisperThreads,
-                    translate = s.whisperTranslate,
-                    initialPrompt = s.whisperPrompt
-                ),
-                onProgress = { p ->
-                    _transcription.value = _transcription.value?.copy(progress = p, phase = "transcribing", queued = txQueue.size)
-                },
-                onPartial = { t ->
-                    _transcription.value = _transcription.value?.copy(partial = t, phase = "transcribing", queued = txQueue.size)
-                }
-            )
-            val elapsed = android.os.SystemClock.elapsedRealtime() - started
-            val audioMs = a.durationMs.takeIf { it > 0 } ?: com.miniichat.audio.WavIO.readInfo(wav)?.durationMs ?: 0L
-            val engine = if (com.miniichat.whisper.WhisperLib.hasGpuDevice()) "GPU" else "CPU"
-            val speed = if (elapsed > 0 && audioMs > 0) "%.1f× realtime".format(audioMs.toDouble() / elapsed) else ""
-            val summary = "${com.miniichat.util.formatDuration(audioMs)} audio in ${com.miniichat.util.formatDuration(elapsed)}" +
-                (if (speed.isNotEmpty()) " · $speed" else "") + " · $engine · " +
-                model.name.removePrefix("ggml-").removeSuffix(".bin")
-            com.miniichat.whisper.WhisperLib.lastRunSummary = summary
-            if (text.isBlank()) {
-                _toast.value = "No speech recognised ($summary)"
-            } else {
-                _toast.value = "Transcribed: $summary"
-                // write straight into the draft the recording belongs to (works even if the chat isn't open)
-                updateDraft(job.draftKey) { d ->
-                    val audios = d.attachments.filter { it.type == "audio" }
-                    val n = audios.indexOfFirst { it.uri == a.uri }.let { if (it < 0) audios.size + 1 else it + 1 }
-                    val label = "🎙 Recording $n (${com.miniichat.util.formatDuration(audioMs)}):\n"
-                    d.copy(
-                        text = if (d.text.isBlank()) label + text else d.text.trimEnd() + "\n\n" + label + text,
-                        attachments = d.attachments.map { if (it.uri == a.uri) it.copy(transcript = text) else it }
-                    )
-                }
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            _error.value = "Transcription failed: ${e.message}"
-        }
-    }
-
-    fun cancelTranscription() {
-        txQueue.clear()
-        transcriber.abort()
-        txWorker?.cancel()
-        txWorker = null
-        _transcription.value = null
-    }
+    fun cancelTranscription() = com.miniichat.whisper.TranscriptionManager.cancelAll()
 
     /** Called by the UI when the dictaphone stops: attach to the current draft (+ queue transcription). */
     fun onRecordingFinished(rec: FinishedRecording, autoTranscribe: Boolean) {
         val key = draftKey()
         val att = recordingToAttachment(rec)
         updateDraft(key) { it.copy(attachments = it.attachments + att) }
+        com.miniichat.data.DraftRepository.flush()
         if (autoTranscribe && settings.value.autoTranscribe) {
             if (hasSpeechModel()) transcribe(att, key)
             else _toast.value = "Recording saved. Install a Whisper model to transcribe it."
         }
     }
 
-    /** Import an existing audio file: decode to 16 kHz WAV, attach it, optionally transcribe. */
+    /** Import an existing audio file: decode to 16 kHz WAV, attach it, optionally transcribe (background). */
     fun importAudio(uri: android.net.Uri) {
-        enqueue(TxJob(draftKey(), null, uri))
+        com.miniichat.whisper.TranscriptionManager.enqueueImport(uri, draftKey())
     }
 
     fun recordingsUsage(): Pair<Int, Long> {
@@ -642,11 +532,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    override fun onCleared() {
-        cancelTranscription()
-        transcriber.release()
-        super.onCleared()
-    }
+    // transcription is owned by TranscriptionManager (foreground service) and must NOT be
+    // cancelled when the screen/ViewModel goes away
 
     fun selectConversation(id: String?) { _activeId.value = id }
 

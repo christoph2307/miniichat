@@ -221,4 +221,6 @@
     <string name="speech_gpu_fa">GPU 上的 Flash Attention</string>
     <string name="speech_gpu_fa_hint">更快，但常导致 GPU 驱动崩溃。默认关闭。</string>
     <string name="speech_gpu_disabled">GPU 加速已关闭：在 Galaxy S23（Adreno 740）上，OpenCL 引擎在转写时导致手机卡死。语音识别在 CPU 上运行（快速 ARMv8.2 构建）。</string>
+    <string name="tx_channel">转写</string>
+    <string name="tx_notification_title">正在转写录音…</string>
 </resources>

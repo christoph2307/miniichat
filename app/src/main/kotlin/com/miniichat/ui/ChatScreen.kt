@@ -173,6 +173,8 @@ fun ChatScreen(
                     MessageItem(
                         message = msg,
                         playback = playback,
+                        onTranscribeAudio = onTranscribe,
+                        transcribingUri = transcription?.attachmentUri,
                         markdownActions = markdownActions,
                         onSaveToWiki = { onSaveToWiki(msg.id) },
                         senderLabel = if (msg.role == "user") "You"
@@ -352,6 +354,8 @@ private fun ChatTopBar(
 private fun MessageItem(
     message: Message,
     playback: AudioPlayback,
+    onTranscribeAudio: (com.miniichat.data.Attachment) -> Unit = {},
+    transcribingUri: String? = null,
     markdownActions: MarkdownActions = MarkdownActions(),
     onSaveToWiki: () -> Unit = {},
     senderLabel: String,
@@ -371,6 +375,8 @@ private fun MessageItem(
         UserBubble(
             message = message,
             playback = playback,
+            onTranscribeAudio = onTranscribeAudio,
+            transcribingUri = transcribingUri,
             editing = editing,
             editingDraft = editingDraft,
             onEditingDraftChange = onEditingDraftChange,
@@ -398,6 +404,8 @@ private fun MessageItem(
 private fun UserBubble(
     message: Message,
     playback: AudioPlayback,
+    onTranscribeAudio: (com.miniichat.data.Attachment) -> Unit = {},
+    transcribingUri: String? = null,
     editing: Boolean,
     editingDraft: String,
     onEditingDraftChange: (String) -> Unit,
@@ -430,7 +438,11 @@ private fun UserBubble(
                                     att = att,
                                     playback = playback,
                                     container = MaterialTheme.colorScheme.primaryContainer,
-                                    content = MaterialTheme.colorScheme.onPrimaryContainer
+                                    content = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    // sent recordings without transcript can still be transcribed;
+                                    // the text lands in this chat's input field
+                                    onTranscribe = if (att.transcript.isNullOrBlank() && transcribingUri != att.uri)
+                                        ({ onTranscribeAudio(att) }) else null
                                 )
                                 val t = att.transcript
                                 if (!t.isNullOrBlank() && !message.content.contains(t.take(60))) {
