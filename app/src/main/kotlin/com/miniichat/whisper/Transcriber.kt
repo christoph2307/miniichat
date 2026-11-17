@@ -51,6 +51,24 @@ class Transcriber {
     fun abort() { if (WhisperLib.isAvailable) WhisperLib.requestAbort() }
 
     /**
+     * Encoder benchmark for several thread counts (one 30-s window each). Calls [onResult]
+     * with (threads, ms) after each measurement; returns all results.
+     */
+    suspend fun benchmark(modelFile: File, threadCounts: List<Int>, onResult: (Int, Double) -> Unit): List<Pair<Int, Double>> =
+        mutex.withLock {
+            withContext(Dispatchers.Default) {
+                ensureLoaded(modelFile)
+                WhisperLib.log("[bench] model=${modelFile.name} ${cpuLayout()} default threads=${defaultThreads()}")
+                threadCounts.map { t ->
+                    ensureActive()
+                    val ms = WhisperLib.benchEncode(ctxPtr, t)
+                    onResult(t, ms)
+                    t to ms
+                }
+            }
+        }
+
+    /**
      * @param onProgress overall progress 0..1
      * @param onPartial accumulated text so far
      */
@@ -134,13 +152,36 @@ class Transcriber {
         const val CHUNK_SAMPLES = WavIO.SAMPLE_RATE * 60 * 5
         const val SEARCH_SAMPLES = WavIO.SAMPLE_RATE * 3
 
+        /**
+         * Threads = number of cores outside the slowest cluster. whisper.cpp synchronises all
+         * threads per layer, so one slow efficiency core holds back the fast ones
+         * (Galaxy S23: 1×X3 + 2×A715 + 2×A710 + 3×A510 → 5 threads).
+         */
         fun defaultThreads(): Int {
             val cores = Runtime.getRuntime().availableProcessors()
+            val freqs = (0 until cores).mapNotNull { i ->
+                runCatching { java.io.File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq").readText().trim().toLong() }.getOrNull()
+            }
+            if (freqs.size == cores && freqs.distinct().size > 1) {
+                val slowest = freqs.min()
+                return freqs.count { it > slowest }.coerceIn(2, 8)
+            }
             return when {
                 cores >= 8 -> 6
                 cores >= 4 -> 4
                 else -> cores.coerceAtLeast(1)
             }
         }
+
+        /** Short description of the CPU layout for logs / settings, e.g. "8 cores: 1×3360 2×2800 2×2800 3×2020 MHz". */
+        fun cpuLayout(): String = runCatching {
+            val cores = Runtime.getRuntime().availableProcessors()
+            val freqs = (0 until cores).mapNotNull { i ->
+                runCatching { java.io.File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq").readText().trim().toLong() / 1000 }.getOrNull()
+            }
+            if (freqs.isEmpty()) return@runCatching "$cores cores"
+            "$cores cores: " + freqs.groupingBy { it }.eachCount().toSortedMap(compareByDescending { it })
+                .entries.joinToString(" ") { "${it.value}×${it.key}" } + " MHz"
+        }.getOrDefault("?")
     }
 }

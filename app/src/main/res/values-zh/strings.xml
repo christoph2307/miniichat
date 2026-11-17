@@ -223,4 +223,8 @@
     <string name="speech_gpu_disabled">GPU 加速已关闭：在 Galaxy S23（Adreno 740）上，OpenCL 引擎在转写时导致手机卡死。语音识别在 CPU 上运行（快速 ARMv8.2 构建）。</string>
     <string name="tx_channel">转写</string>
     <string name="tx_notification_title">正在转写录音…</string>
+    <string name="speech_auto_threads">自动 = %1$d 线程</string>
+    <string name="speech_bench">测量速度（约 1–3 分钟）</string>
+    <string name="speech_bench_line">%1$d 线程：每 30 秒窗口 %2$.1f 秒 → %3$.1f 倍实时（编码器）</string>
+    <string name="speech_bench_applied">已应用最快设置：%1$d 线程</string>
 </resources>

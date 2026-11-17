@@ -290,7 +290,13 @@ Java_com_miniichat_whisper_WhisperLib_transcribe(
     jsize n = env->GetArrayLength(samples);
     jfloat *data = env->GetFloatArrayElements(samples, nullptr);
 
+    whisper_reset_timings(ctx);
+    {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        if (g_log_file) { fprintf(g_log_file, "[jni] whisper_full: %d samples (%.1f s), threads=%d, lang=%s\n", (int) n, n / 16000.0, params.n_threads, params.language); }
+    }
     int rc = whisper_full(ctx, params, data, n);
+    whisper_print_timings(ctx);  // encode / decode / fallbacks → engine log
 
     env->ReleaseFloatArrayElements(samples, data, JNI_ABORT);
 
@@ -309,6 +315,28 @@ Java_com_miniichat_whisper_WhisperLib_transcribe(
     if (prompt) env->ReleaseStringUTFChars(initialPrompt, prompt);
 
     return toJString(env, out.c_str());
+}
+
+/**
+ * Encoder benchmark (same method as whisper.cpp's bench tool): time to encode one 30-second
+ * window with [threads]. Returns milliseconds, or -1 on error. The first call per context
+ * includes a warm-up run.
+ */
+JNIEXPORT jdouble JNICALL
+Java_com_miniichat_whisper_WhisperLib_benchEncode(JNIEnv *, jobject, jlong ptr, jint threads) {
+    auto *ctx = reinterpret_cast<whisper_context *>(ptr);
+    if (!ctx) return -1;
+    if (whisper_set_mel(ctx, nullptr, 0, whisper_model_n_mels(ctx)) != 0) return -1;
+    static whisper_context *warmed = nullptr;
+    if (warmed != ctx) { if (whisper_encode(ctx, 0, threads) != 0) return -1; warmed = ctx; }
+    const int64_t t0 = ggml_time_us();
+    if (whisper_encode(ctx, 0, threads) != 0) return -1;
+    const double ms = (ggml_time_us() - t0) / 1000.0;
+    {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        if (g_log_file) { fprintf(g_log_file, "[bench] encoder 30 s window, %d threads: %.0f ms\n", (int) threads, ms); }
+    }
+    return ms;
 }
 
 JNIEXPORT jstring JNICALL

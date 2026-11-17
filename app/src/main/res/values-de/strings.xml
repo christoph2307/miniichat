@@ -127,4 +127,8 @@
     <string name="speech_gpu_disabled">GPU-Beschleunigung ist deaktiviert: Auf dem Galaxy S23 (Adreno 740) hat die OpenCL-Engine das Telefon während der Transkription eingefroren. Die Spracherkennung läuft auf der CPU (schneller ARMv8.2-Build).</string>
     <string name="tx_channel">Transkription</string>
     <string name="tx_notification_title">Aufnahmen werden transkribiert…</string>
+    <string name="speech_auto_threads">auto = %1$d Threads</string>
+    <string name="speech_bench">Geschwindigkeit messen (≈1–3 min)</string>
+    <string name="speech_bench_line">%1$d Threads: %2$.1f s pro 30-s-Fenster → %3$.1f× Echtzeit (Encoder)</string>
+    <string name="speech_bench_applied">Schnellste Einstellung übernommen: %1$d Threads</string>
 </resources>

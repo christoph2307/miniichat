@@ -175,7 +175,9 @@ object TranscriptionManager {
         if (!wav.exists()) throw IllegalStateException("Recording file not found: ${wav.name}")
 
         _state.value = TranscriptionUi(a.uri, a.name, phase = "loading", queued = queuedCount() - 1)
-        WhisperLib.log("[app] transcribe ${a.name} (${a.durationMs} ms) model=${model.name} threads=${s.whisperThreads}")
+        WhisperLib.log("[app] transcribe ${a.name} (${a.durationMs} ms) model=${model.name} threads=" +
+            (if (s.whisperThreads > 0) "${s.whisperThreads}" else "auto(${Transcriber.defaultThreads()})") +
+            " engine=${WhisperLib.variant} ${Transcriber.cpuLayout()}")
         val started = SystemClock.elapsedRealtime()
         val text = transcriber.transcribeWav(
             modelFile = model,
@@ -218,6 +220,41 @@ object TranscriptionManager {
         name.takeIf { it.isNotBlank() }?.let { File(File(app.filesDir, "whisper"), it) }?.takeIf { it.exists() }
 
     fun hasModel(modelName: String): Boolean = modelFile(modelName) != null
+
+    // ── speed test ──
+    data class BenchState(val running: Boolean, val results: List<Pair<Int, Double>>, val best: Int? = null, val error: String? = null)
+    private val _bench = MutableStateFlow<BenchState?>(null)
+    val bench: StateFlow<BenchState?> = _bench.asStateFlow()
+    private var benchJob: kotlinx.coroutines.Job? = null
+
+    /** Measure encoder speed for several thread counts; [onBest] receives the fastest. */
+    fun runBenchmark(modelName: String, onBest: (Int) -> Unit) {
+        if (_busy.value || benchJob?.isActive == true) {
+            _bench.value = BenchState(false, emptyList(), error = "Busy — wait until the transcription has finished")
+            return
+        }
+        val model = modelFile(modelName) ?: run {
+            _bench.value = BenchState(false, emptyList(), error = "No speech model selected"); return
+        }
+        val cores = Runtime.getRuntime().availableProcessors()
+        val counts = (listOf(2, 3, 4, 5, 6, 8) + Transcriber.defaultThreads()).filter { it in 1..cores }.distinct().sorted()
+        _bench.value = BenchState(true, emptyList())
+        benchJob = scope.launch {
+            try {
+                val results = transcriber.benchmark(model, counts) { t, ms ->
+                    _bench.value = _bench.value?.copy(results = _bench.value!!.results + (t to ms))
+                }.filter { it.second > 0 }
+                val best = results.minByOrNull { it.second }?.first
+                _bench.value = BenchState(false, results, best)
+                if (best != null) onBest(best)
+            } catch (e: CancellationException) {
+                _bench.value = null
+                throw e
+            } catch (e: Throwable) {
+                _bench.value = BenchState(false, _bench.value?.results.orEmpty(), error = e.message ?: "Benchmark failed")
+            }
+        }
+    }
 
     private fun startService() {
         runCatching {

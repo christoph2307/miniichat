@@ -359,6 +359,37 @@ fun SpeechSettingsScreen(
                         Text(stringResource(R.string.speech_gpu_disabled), style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    // ── speed test ──
+                    val bench by com.miniichat.whisper.TranscriptionManager.bench.collectAsState()
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        com.miniichat.whisper.Transcriber.cpuLayout() + " · " +
+                            stringResource(R.string.speech_auto_threads, com.miniichat.whisper.Transcriber.defaultThreads()),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(
+                        enabled = bench?.running != true && settings.whisperModel.isNotBlank(),
+                        onClick = {
+                            com.miniichat.whisper.TranscriptionManager.runBenchmark(settings.whisperModel) { best ->
+                                onChange { it.copy(whisperThreads = best) }
+                            }
+                        }
+                    ) { Text(stringResource(R.string.speech_bench)) }
+                    bench?.let { b ->
+                        if (b.running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        b.results.forEach { (t, ms) ->
+                            val rt = if (ms > 0) 30_000.0 / ms else 0.0
+                            Text(
+                                (if (t == b.best) "★ " else "• ") +
+                                    stringResource(R.string.speech_bench_line, t, ms / 1000.0, rt),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (t == b.best) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        b.best?.let { Text(stringResource(R.string.speech_bench_applied, it), style = MaterialTheme.typography.bodySmall) }
+                        b.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    }
+
                     WhisperLib.lastRunSummary?.let {
                         Spacer(Modifier.height(8.dp))
                         Text(stringResource(R.string.speech_last_run, it), style = MaterialTheme.typography.bodySmall,

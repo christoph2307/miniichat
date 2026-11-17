@@ -200,6 +200,8 @@ object WhisperLib {
         listener: WhisperListener?
     ): String
     external fun systemInfo(): String
+    /** ms to encode one 30-s window with [threads] (whisper.cpp bench method), -1 on error. */
+    external fun benchEncode(ptr: Long, threads: Int): Double
     /** One line per compute device: "TYPE\tname\tdescription". */
     external fun listDevices(): String
     /** true if this native build contains the OpenCL GPU backend. */
